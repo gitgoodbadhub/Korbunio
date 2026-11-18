@@ -9,7 +9,7 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-PACKAGE = "de.korbunio.korbunio_app"
+PACKAGE = "de.korbunio.plus"
 REGIONS = [("Hamburg", "20095"), ("Berlin", "10115"), ("Cologne", "50667"),
            ("Munich", "80331"), ("Frankfurt", "60311"), ("Dresden", "01067"),
            ("Rastede", "26180"), ("Leipzig", "04109")]

@@ -19,7 +19,7 @@ import java.security.MessageDigest
 class UpdateService(
     private val context: Context,
     private val http: OkHttpClient = OkHttpClient(),
-    private val repository: String = "lesecuritae/Korbunio",
+    private val repository: String = "gitgoodbadhub/korbunio",
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -66,7 +66,7 @@ class UpdateService(
     }
 
     fun install(file: File): Intent {
-        val uri: Uri = FileProvider.getUriForFile(context, "de.lesecuritae.korbuino.fileprovider", file)
+        val uri: Uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         return Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)

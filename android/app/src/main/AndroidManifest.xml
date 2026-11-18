@@ -9,7 +9,7 @@
         android:name=".KorbuinoApplication"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
-        android:label="Korbuino"
+        android:label="Korbunio Plus"
         android:supportsRtl="true"
         android:theme="@style/Theme.Korbuino">
         <activity
@@ -32,7 +32,7 @@
             android:exported="false" />
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="de.lesecuritae.korbuino.fileprovider"
+            android:authorities="${applicationId}.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data
