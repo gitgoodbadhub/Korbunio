@@ -106,6 +106,12 @@ Händler-Anbindungen aus dem Original gelegentlich übernehmen – eigene
      Umgehung von Captchas oder Logins; AGB je Shop vorher prüfen.
    - Ergebnisse 14 Tage zwischenspeichern, danach automatisch löschen; jeder Treffer mit
      „regulärer Shop-Preis · Stand TT.MM.“ gekennzeichnet. Optional Preisverlauf (nur Änderungen).
+   - **Sparprinzip – nur der Günstigste wird gespeichert:** je Produktart und Laden bleibt
+     nur der Treffer mit dem niedrigsten **Grundpreis** (z. B. €/l), nicht zehn Milchsorten.
+     Produktart = die Suchanfrage bzw. Vorlagen-Position, inkl. ihrer Merkmale
+     (z. B. „Vollmilch 1 l“ ≠ „fettarme Milch“ ≠ „Bio-Vollmilch“), damit nur Vergleichbares
+     konkurriert. Optional je Position weitere Merkmale vorgeben (Bio, Marke, Mindestmenge).
+     Hält den Speicher auf wenige hundert Einträge.
    - Einstellbar: Vorhaltezeit 1/7/14/30 Tage, Preisverlauf an/aus, Anzeige „belegter
      Speicher“ mit Button zum Leeren. Erwarteter Speicher: wenige MB.
    - Aufwand: Grundgerüst ca. 2 PRs, je einfachem Shop 1 PR, schwierige Shops (Bot-Schutz,
