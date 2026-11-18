@@ -72,6 +72,35 @@ class FavoritesScreenTest {
         compose.runOnIdle { assertEquals("stable",removed) }
     }
 
+    private fun currentOffer(id: String, retailer: String, cents: Int, url: String) = run {
+        val today = java.time.LocalDate.now(java.time.ZoneId.of("Europe/Berlin"))
+        OfferDisplay(de.lesecuritae.korbuino.data.OfferEntity(id, retailer, "p-$id", externalId = id, priceCents = cents,
+            validFrom = today.minusDays(1).toString(), validUntil = today.plusDays(3).toString(), sourceUrl = url, cachedAt = 0),
+            productName = "Coca Cola Zero 1l")
+    }
+
+    @Test fun favoriteShowsCheapestCurrentOfferWithLinkAndLimitHint() {
+        val cheap = FavoriteEntity("cheap",1,"Coca-Cola")
+        val limited = FavoriteEntity("limited",2,"Coca-Cola",maxPriceCents=100)
+        val missing = FavoriteEntity("missing",3,"Em-eukal")
+        val offers = listOf(currentOffer("a","rewe",149,"https://www.rewe.de/a"), currentOffer("b","aldi-nord",119,"not a link"))
+        compose.setContent {
+            MaterialTheme {
+                FavoritesContent(MainUiState(postalCode="12345",favorites=listOf(cheap,limited,missing),offers=offers),
+                    mapOf("rewe" to "REWE","aldi-nord" to "ALDI Nord"),onSave={_,_,_,_,_,_,_ ->},onRemove={})
+            }
+        }
+        compose.onNodeWithTag("favorites_screen").performScrollToNode(hasTestTag("favorite_best_cheap"))
+        compose.onNodeWithTag("favorite_best_cheap").assert(hasAnyDescendant(hasText("ALDI Nord", substring = true)))
+        compose.onNodeWithTag("favorite_best_cheap").assert(hasAnyDescendant(hasText("1,19", substring = true)))
+        // The cheapest offer has no HTTPS link, so no link button may appear for it.
+        compose.onAllNodesWithTag("favorite_link_cheap").assertCountEquals(0)
+        compose.onNodeWithTag("favorites_screen").performScrollToNode(hasTestTag("favorite_over_limit_limited"))
+        compose.onNodeWithTag("favorite_over_limit_limited").assertIsDisplayed()
+        compose.onNodeWithTag("favorites_screen").performScrollToNode(hasTestTag("favorite_best_none_missing"))
+        compose.onNodeWithTag("favorite_best_none_missing").assertIsDisplayed()
+    }
+
     @Test fun ntfyInvalidUrlCannotSaveOrSendAndDisabledHasNoTestAction() {
         var saves=0
         var sends=0

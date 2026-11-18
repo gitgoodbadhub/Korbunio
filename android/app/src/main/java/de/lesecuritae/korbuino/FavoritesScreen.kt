@@ -13,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -81,6 +82,10 @@ internal fun FavoritesContent(
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(favorite.query, style = MaterialTheme.typography.titleMedium)
+                    val best = remember(favorite, state.offers, state.postalCode, state.selectedLoyaltyPrograms, today) {
+                        FavoriteOffers.best(favorite, state.offers, state.postalCode, today, state.selectedLoyaltyPrograms)
+                    }
+                    FavoriteBestOfferRow(favorite, best, retailerNames, state.selectedLoyaltyPrograms)
                     val ids = favoriteRetailers(favorite)
                     Text(if (ids.isEmpty()) "Alle Händler" else ids.sorted().joinToString { retailerNames[it] ?: it })
                     Text(favorite.maxPriceCents?.let { "Preisgrenze: ${OfferMatcher.formatPrice(it)}" } ?: "Ohne Preisgrenze")
@@ -111,6 +116,48 @@ internal fun FavoritesContent(
                 TextButton(onClick = { onRemove(favorite); deleting = null }) { Text("Löschen") }
             }, dismissButton = { TextButton(onClick = { deleting = null }) { Text("Abbrechen") } })
     }
+}
+
+/** Picture, cheapest offer valid today, retailer, validity and retailer link of one favorite. */
+@Composable
+private fun FavoriteBestOfferRow(
+    favorite: FavoriteEntity,
+    best: FavoriteBestOffer?,
+    retailerNames: Map<String, String>,
+    selectedPrograms: Set<String>,
+) {
+    if (best == null) {
+        Text("Heute kein passendes Angebot in den geladenen Daten.", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("favorite_best_none_${favorite.productId}"))
+        return
+    }
+    val display = best.display
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().testTag("favorite_best_${favorite.productId}")) {
+        OfferThumbnail(display.imagePath, display.imageUrl, display.imageReferer ?: display.offer.sourceUrl,
+            contentDescription = display.productName, note = display.imageNote, fallbacks = display.imageFallbacks)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("Bestpreis heute", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(offerPriceLabel(display, selectedPrograms), style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("${retailerNames[display.offer.retailerId] ?: display.offer.retailerId} · ${display.productName}",
+                style = MaterialTheme.typography.bodyMedium)
+            display.offer.basePriceCents?.let { base ->
+                Text("Grundpreis ${OfferMatcher.formatPrice(base)}/${display.offer.baseUnit ?: "Einheit"}",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("Gültig bis ${display.offer.validUntil ?: "unbekannt"}", style = MaterialTheme.typography.bodySmall)
+            if (!best.withinLimit) {
+                Text("Über deiner Preisgrenze", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.testTag("favorite_over_limit_${favorite.productId}"))
+            }
+            if (best.matchCount > 1) {
+                Text("${best.matchCount} passende Angebote heute", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+    OfferLinkButton(display.offer.sourceUrl, "favorite_link_${favorite.productId}")
 }
 
 @Composable
