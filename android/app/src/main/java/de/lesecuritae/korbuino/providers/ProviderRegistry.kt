@@ -7,6 +7,18 @@ class ProviderRegistry(private val providers: List<RetailerProvider>) {
     fun byId(id: String): RetailerProvider? = all().firstOrNull { it.id == id }
 
     companion object {
+        /**
+         * Korbunio Plus: retailers without an own public offer API (Action, KODi, KiK,
+         * Woolworth). Same pattern as trinkgut: the regional Marktguru catalogue first,
+         * the kaufDA retailer page as fallback. Both only accept offers whose advertiser
+         * matches [name]; an unknown retailer yields no offers instead of foreign ones.
+         */
+        internal fun catalogueOnly(id: String, name: String, http: okhttp3.OkHttpClient): RetailerProvider =
+            FallbackRetailerProvider(
+                MarktguruProvider(name, http, providerId = id, providerDisplayName = name),
+                KaufdaRetailerProvider(id, name, name, name, http),
+            )
+
         fun default(http: okhttp3.OkHttpClient): ProviderRegistry {
             val aldiMarkets = AldiMarkets(http)
             return ProviderRegistry(
@@ -74,6 +86,10 @@ class ProviderRegistry(private val providers: List<RetailerProvider>) {
                     KaufdaRetailerProvider("marktguru-lidl", "Lidl", "Lidl", "Lidl", http, regionalViewer = true),
                 ),
                 MarktguruProvider("PENNY", http),
+                catalogueOnly("action", "Action", http),
+                catalogueOnly("kodi", "KODi", http),
+                catalogueOnly("kik", "KiK", http),
+                catalogueOnly("woolworth", "Woolworth", http),
             ),
         )
         }
