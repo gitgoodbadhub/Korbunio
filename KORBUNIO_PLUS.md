@@ -106,7 +106,8 @@ Händler-Anbindungen aus dem Original gelegentlich übernehmen – eigene
      Umgehung von Captchas oder Logins; AGB je Shop vorher prüfen.
    - Ergebnisse 14 Tage zwischenspeichern, danach automatisch löschen; jeder Treffer mit
      „regulärer Shop-Preis · Stand TT.MM.“ gekennzeichnet. Optional Preisverlauf (nur Änderungen).
-   - **Sparprinzip – nur der Günstigste wird gespeichert:** je Produktart und Laden bleibt
+   - **Sparprinzip – nur der Günstigste wird gespeichert (gilt für alle Produkte:
+     Lebensmittel, Getränke, Drogerie, Haushalt, Non-Food; Milch ist nur ein Beispiel):** je Produktart und Laden bleibt
      nur der Treffer mit dem niedrigsten **Grundpreis** (z. B. €/l), nicht zehn Milchsorten.
      Produktart = die Suchanfrage bzw. Vorlagen-Position, inkl. ihrer Merkmale
      (z. B. „Vollmilch 1 l“ ≠ „fettarme Milch“ ≠ „Bio-Vollmilch“), damit nur Vergleichbares
