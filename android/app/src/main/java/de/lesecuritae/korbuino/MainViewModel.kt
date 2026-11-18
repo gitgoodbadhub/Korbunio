@@ -83,6 +83,8 @@ data class MainUiState(
     val serverToken: String = "",
     val serverMode: Boolean = false,
     val selectedLoyaltyPrograms: Set<String> = emptySet(),
+    /** Korbunio Plus: shops and visiting order for the shopping plan. */
+    val storeRoute: StoreRouteUi = StoreRouteUi(),
 )
 
 data class OfferDisplay(
@@ -216,6 +218,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             message("Favorit gespeichert. Meldungen benötigen zusätzlich eine aktivierte ntfy-Verbindung.")
         }
     }
+
+    /** Finds the nearest shop of every retailer in the shopping plan via OpenStreetMap and orders the stops. */
+    fun planRoute(retailerIds: List<String>) {
+        val current = _state.value
+        if (current.storeRoute.loading) return
+        if (retailerIds.isEmpty()) { message("Für die Route zuerst Angebote in der Einkaufsliste auswählen"); return }
+        _state.value = current.copy(storeRoute = StoreRouteUi(requested = true, loading = true))
+        viewModelScope.launch {
+            val result = runCatching { StoreFinder(NetworkClientFactory.create(getApplication())).find(current.postalCode, retailerIds) }
+            _state.value = _state.value.copy(storeRoute = result.fold(
+                onSuccess = { StoreRouteUi(requested = true, stops = it.stops, missingRetailerIds = it.missingRetailerIds) },
+                onFailure = { StoreRouteUi(requested = true, error = it.message ?: "Filialsuche fehlgeschlagen") },
+            ))
+        }
+    }
+
+    fun clearRoute() { _state.value = _state.value.copy(storeRoute = StoreRouteUi()) }
 
     fun removeFavorite(favorite: FavoriteEntity) {
         viewModelScope.launch { database.favoriteDao().remove(favorite.productId) }

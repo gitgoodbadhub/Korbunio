@@ -775,5 +775,6 @@ internal fun ShoppingListOverview(state: MainUiState, viewModel: MainViewModel) 
         undo = viewModel::undoRemoveShoppingItem, quantity = viewModel::shoppingQuantity,
         checked = viewModel::shoppingChecked, choose = viewModel::selectShoppingOffer,
         favorite = { viewModel.saveFavorite(it, emptySet(), null, true, true, false) },
+        route = viewModel::planRoute, clearRoute = viewModel::clearRoute,
     ))
 }

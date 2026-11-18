@@ -22,6 +22,8 @@ internal data class ShoppingActions(
     val checked: (ShoppingListRow, Boolean) -> Unit = { _, _ -> },
     val choose: (ShoppingListRow, OfferDisplay?) -> Unit = { _, _ -> },
     val favorite: (String) -> Unit = {},
+    val route: (List<String>) -> Unit = {},
+    val clearRoute: () -> Unit = {},
 )
 
 /** One bounded vertical list: headers, plan and expanded rows all share its scroll state. */
@@ -85,8 +87,15 @@ internal fun ShoppingListContent(
                         }
                         if (plan.savedTrips > 0) Text("Spartipp: ${plan.savedTrips} Einkaufwege sparen für ${OfferMatcher.formatPrice(plan.consolidationExtraCents)} mehr. Angebote ausdrücklich auswählen.")
                         if (plan.unmatchedItems.isNotEmpty()) Text("Für ${plan.unmatchedItems.size} Positionen fehlt ein vollständiger aktueller Vergleichspreis.")
+                        if (plan.actualStores.isNotEmpty()) {
+                            Button(onClick = { actions.route(plan.actualStores) }, enabled = !state.storeRoute.loading,
+                                modifier = Modifier.testTag("shopping-route")) { Text("Filialen & Route anzeigen") }
+                        }
                     }
                 }
+            }
+            if (state.storeRoute.requested) item(key = "route") {
+                StoreRouteCard(state.storeRoute, retailerNames, onClose = actions.clearRoute)
             }
             groups.forEach { (group, rows) ->
                 val label = when {
