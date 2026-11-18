@@ -50,4 +50,25 @@ class CatalogueRetailersTest {
         server.takeRequest()
         assertEquals("KODi", server.takeRequest().requestUrl!!.queryParameter("q"))
     }
+
+    @Test fun `placeholder brands are dropped but real brands are kept`() {
+        listOf("thisisnobrand", "THISISNOBRAND2", "This is no brand", "ohne Marke", "  no-brand ", "", null).forEach {
+            assertEquals("'$it' is a placeholder", "", ProviderParsing.cleanBrand(it))
+        }
+        assertEquals("Milka", ProviderParsing.cleanBrand(" Milka "))
+        assertEquals("No Name Foods", ProviderParsing.cleanBrand("No Name Foods"))
+    }
+
+    @Test fun `Woolworth placeholder brand does not end up in the product name`() = runTest {
+        server.enqueue(MockResponse().setBody("<script>{\"apiKey\":\"a\",\"clientKey\":\"c\"}</script>"))
+        server.enqueue(MockResponse().setBody("""
+            {"results":[{"id":"golf","advertisers":[{"uniqueName":"woolworth"}],"brand":{"name":"thisisnobrand"},
+              "product":{"name":"123 Miniatur Golf Set"},"price":"1,50"}]}
+        """))
+        val provider = MarktguruProvider("Woolworth", OkHttpClient(), server.url("/home").toString(), server.url("/search").toString(),
+            providerId = "woolworth", providerDisplayName = "Woolworth")
+        val result = provider.fetch(RetailerRequest("56070"))
+        assertEquals(listOf("123 Miniatur Golf Set"), result.products.map { it.name })
+        assertEquals("", result.products.single().brand)
+    }
 }

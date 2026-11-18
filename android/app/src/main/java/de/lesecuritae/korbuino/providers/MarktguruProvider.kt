@@ -128,7 +128,7 @@ class MarktguruProvider(
             val validity = activeValidity(item, week) ?: return@forEachIndexed
             val product = item["product"]?.jsonObject ?: item
             val rawName = text(product, "name", "title", "productName") ?: return@forEachIndexed
-            val brand = item["brand"]?.let { runCatching { text(it.jsonObject, "name") }.getOrNull() }.orEmpty()
+            val brand = ProviderParsing.cleanBrand(item["brand"]?.let { runCatching { text(it.jsonObject, "name") }.getOrNull() })
             val name = if (brand.isBlank() || rawName.contains(brand, ignoreCase = true)) rawName else "$brand $rawName"
             val advertisedPrice = number(item, "price", "currentPrice", "regularPrice")
                 ?: number(product, "price", "currentPrice") ?: return@forEachIndexed

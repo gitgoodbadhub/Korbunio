@@ -69,7 +69,7 @@ class KaufdaRetailerProvider(
             val validUntil = item.instant("validUntil") ?: return@forEachIndexed
             if (!selected(validFrom, validUntil, week)) return@forEachIndexed
             val title = item.text("title") ?: return@forEachIndexed
-            val brand = item.text("brand").orEmpty()
+            val brand = ProviderParsing.cleanBrand(item.text("brand"))
             val name = if (brand.isBlank() || title.contains(brand, ignoreCase = true)) title else "$brand $title"
             val price = item["prices"]?.jsonObject?.get("mainPrice")?.jsonPrimitive?.doubleOrNull
                 ?.takeIf { it > 0.0 } ?: return@forEachIndexed
