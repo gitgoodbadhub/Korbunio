@@ -740,6 +740,7 @@ private fun OfferOverview(
                             if ((BerlinDate.toLocalDate(offer.offer.validFrom) ?: "") > java.time.LocalDate.now(java.time.ZoneId.of("Europe/Berlin")).toString()) {
                                 Text("Zukünftig ab ${offer.offer.validFrom}; nicht für den heutigen Einkauf.")
                             }
+                            OfferLinkButton(offer.offer.sourceUrl, "offer_link_${offer.offer.id}")
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                 TextButton(onClick = { viewModel.addOfferToShoppingList(offer) }) { Text("Zur Einkaufsliste") }
                                 TextButton(onClick = { viewModel.saveFavorite(offer.productName, setOf(offer.offer.retailerId), null, true, true, false) }) { Text("Favorit") }

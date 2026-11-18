@@ -98,7 +98,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      issues: write
 
     steps:
       - name: Check out repository
@@ -129,18 +128,18 @@ jobs:
       - name: Build APK
         working-directory: android
         env:
-          KORBUNIO_STORE_FILE: /tmp/korbunio-release.jks
-          KORBUNIO_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          KORBUNIO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KORBUNIO_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          KORBUNIO_REQUIRE_SIGNED_RELEASE: "true"
+          KORBUINO_STORE_FILE: /tmp/korbunio-release.jks
+          KORBUINO_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KORBUINO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KORBUINO_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KORBUINO_REQUIRE_SIGNED_RELEASE: "true"
         run: ./gradlew assembleStandardRelease
 
       - name: Sign native release APK
         env:
-          KORBUNIO_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-          KORBUNIO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KORBUNIO_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KORBUINO_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KORBUINO_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KORBUINO_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           APK_DIR=android/app/build/outputs/apk/standard/release
           INPUT="$APK_DIR/app-standard-release-unsigned.apk"
@@ -148,9 +147,9 @@ jobs:
           test -f "$INPUT"
           "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner" sign \
             --ks /tmp/korbunio-release.jks \
-            --ks-pass env:KORBUNIO_STORE_PASSWORD \
-            --ks-key-alias "$KORBUNIO_KEY_ALIAS" \
-            --key-pass env:KORBUNIO_KEY_PASSWORD \
+            --ks-pass env:KORBUINO_STORE_PASSWORD \
+            --ks-key-alias "$KORBUINO_KEY_ALIAS" \
+            --key-pass env:KORBUINO_KEY_PASSWORD \
             --out "$APK_DIR/app-standard-release-signed.apk" "$INPUT"
           mv "$APK_DIR/app-standard-release-signed.apk" "$APK_DIR/app-standard-release.apk"
 
@@ -197,7 +196,7 @@ jobs:
           import urllib.request
           from pathlib import Path
 
-          repository = "lesecuritae/Korbunio"
+          repository = os.environ["GITHUB_REPOSITORY"]
           tag = os.environ["GITHUB_REF_NAME"]
           token = os.environ["GH_TOKEN"]
           version = tag.removeprefix("v")
@@ -258,7 +257,7 @@ jobs:
               payload={
                   "tag_name": tag,
                   "target_commitish": os.environ["GITHUB_SHA"],
-                  "name": f"Korbuino {tag}",
+                  "name": f"Korbunio Plus {tag}",
                   "body": release_notes,
                   "draft": True,
                   "prerelease": False,
@@ -307,26 +306,6 @@ jobs:
 
           print(f"Published {tag} with assets: {sorted(published_assets)}")
           PY
-
-      - name: Close issues delivered by this milestone
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: lesecuritae/Korbunio
-        run: |
-          close_issue() {
-            issue="$1"
-            comment="$2"
-            state="$(gh issue view "$issue" --repo "$GH_REPO" --json state --jq .state)"
-            if [ "$state" = "OPEN" ]; then
-              gh issue close "$issue" --repo "$GH_REPO" --reason completed --comment "$comment"
-            fi
-          }
-
-          close_issue 8 "Mit Korbuino v0.1.35 wurden die nativen Händlerabrufe, die REWE-PLZ- und Wochenlogik, die Angebotsvalidierung sowie die Produktbildkette überarbeitet und im Android-Emulator geprüft. Weitere Händlerwünsche können als eigene, klar abgegrenzte Anfrage erfasst werden."
-          close_issue 15 "Korbuino v0.1.35 nutzt strukturierte öffentliche bzw. offizielle Datenquellen, wo diese technisch verlässlich verfügbar sind, und hält die native App dabei serverlos. Anbieterabhängige Einschränkungen werden getrennt ausgewiesen statt mit erfundenen Daten überdeckt."
-          close_issue 39 "Die Docker-Startseite zeigt ab Korbuino v0.1.35 die laufende Versionsnummer sichtbar im Seitenfuß an."
-          close_issue 40 "Das mobile Angebotslayout und das Scrollverhalten wurden in Korbuino v0.1.35 korrigiert und auf Smartphone-Auflösungen sowie im Android-Emulator geprüft."
 
       - name: Explain how to install it
         run: |

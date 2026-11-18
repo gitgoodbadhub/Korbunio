@@ -12,9 +12,9 @@ android {
     sourceSets.getByName("test").resources.srcDir("../../tests/fixtures")
 
     defaultConfig {
-        // Keep the package used by the previously distributed Android app so
-        // the native serverless release can replace it without losing data.
-        applicationId = "de.korbunio.korbunio_app"
+        // Korbunio Plus is a fork with its own signing key, so it needs its own
+        // package to install next to (not over) the upstream Korbuino app.
+        applicationId = "de.korbunio.plus"
         minSdk = 26
         targetSdk = 37
         versionCode = 83
