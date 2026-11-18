@@ -85,6 +85,17 @@ Händler-Anbindungen aus dem Original gelegentlich übernehmen – eigene
 | 4 | Startbildschirm-Widget (Jetpack Glance) mit Favoriten und Bestpreisen | offen |
 | 5 | KI-Sprachassistent: eigener Claude-API-Schlüssel im Keystore, wertet Favoriten und geladene Angebote aus; Sprache über Android-Spracherkennung | offen |
 
+### Wunschliste (18.11.2026)
+1. **Weitere Geschäfte:** Action, KODi, KiK, Woolworth – voraussichtlich über die
+   vorhandenen kaufDA-/Marktguru-Adapter (je Händler ein Registereintrag), Prüfung auf dem Gerät.
+2. **Einkaufsroute:** Einkaufsliste mit den gewählten Geschäften als Route in einer
+   Karten-App öffnen (Google Maps mit mehreren Stopps; Einzelziele auch für OsmAnd,
+   Organic Maps u. a.). Baut auf dem vorhandenen Einkaufsplan und Phase 3 (Filialen) auf.
+3. **Kaufassistent per Sprache:** Wunschprodukte, Preisobergrenze je Produkt oder für den
+   ganzen Einkauf, automatische Einkaufsliste und Route – zuerst als Sprach-Button in der
+   App, danach Anbindung an Gemini auf dem Smartphone (abhängig davon, was Android/Gemini
+   für Dritt-Apps freigibt).
+
 Kosten: GitHub Actions und Releases kostenlos (öffentliches Repository);
 Händlerdaten, Karten-Navigation und Widget ohne kostenpflichtige API.
 Nur Phase 5 verursacht Kosten über den eigenen Claude-API-Schlüssel
