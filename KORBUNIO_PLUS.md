@@ -86,8 +86,11 @@ Händler-Anbindungen aus dem Original gelegentlich übernehmen – eigene
 | 5 | KI-Sprachassistent: eigener Claude-API-Schlüssel im Keystore, wertet Favoriten und geladene Angebote aus; Sprache über Android-Spracherkennung | offen |
 
 ### Wunschliste (18.11.2026)
-1. **Weitere Geschäfte:** Action, KODi, KiK, Woolworth – voraussichtlich über die
-   vorhandenen kaufDA-/Marktguru-Adapter (je Händler ein Registereintrag), Prüfung auf dem Gerät.
+1. **Weitere Geschäfte:** Action, KODi, KiK, Woolworth über die vorhandenen
+   Marktguru-/kaufDA-Adapter – ✅ umgesetzt ([PR #3](https://github.com/gitgoodbadhub/Korbunio/pull/3)).
+   Woolworth liefert auf dem Gerät Angebote; Action, KODi, KiK noch zu prüfen.
+   Platzhalter-Marke „thisisnobrand“ wird entfernt ([PR #4](https://github.com/gitgoodbadhub/Korbunio/pull/4)).
+   Hinweis: erfasst werden nur Prospekt-/Aktionsangebote, nicht das ganze Sortiment.
 2. **Einkaufsroute:** Einkaufsliste mit den gewählten Geschäften als Route in einer
    Karten-App öffnen (Google Maps mit mehreren Stopps; Einzelziele auch für OsmAnd,
    Organic Maps u. a.). Baut auf dem vorhandenen Einkaufsplan und Phase 3 (Filialen) auf.
@@ -95,6 +98,34 @@ Händler-Anbindungen aus dem Original gelegentlich übernehmen – eigene
    ganzen Einkauf, automatische Einkaufsliste und Route – zuerst als Sprach-Button in der
    App, danach Anbindung an Gemini auf dem Smartphone (abhängig davon, was Android/Gemini
    für Dritt-Apps freigibt).
+4. **Gezielte Shop-Suche (reguläres Sortiment), Vorhaltezeit 14 Tage:**
+   - Sucht nur auf Anfrage (Wunsch, Favorit, Einkaufsliste, Muster-Warenkorb) in den
+     Online-Shops/Sortimentsseiten der Händler – kein Spiegeln ganzer Kataloge.
+   - Ohne KI: einfache Parser (schema.org-Produktdaten, Shop-Suche als JSON), `robots.txt`
+     beachten, höchstens etwa eine Anfrage alle 2–3 s, erkennbarer User-Agent, keine
+     Umgehung von Captchas oder Logins; AGB je Shop vorher prüfen.
+   - Ergebnisse 14 Tage zwischenspeichern, danach automatisch löschen; jeder Treffer mit
+     „regulärer Shop-Preis · Stand TT.MM.“ gekennzeichnet. Optional Preisverlauf (nur Änderungen).
+   - Einstellbar: Vorhaltezeit 1/7/14/30 Tage, Preisverlauf an/aus, Anzeige „belegter
+     Speicher“ mit Button zum Leeren. Erwarteter Speicher: wenige MB.
+   - Aufwand: Grundgerüst ca. 2 PRs, je einfachem Shop 1 PR, schwierige Shops (Bot-Schutz,
+     marktabhängige Preise wie REWE) 2–3 PRs oder nicht sinnvoll; zuerst 2–3 einfache Shops
+     (z. B. KiK, Woolworth), dann entscheiden.
+5. **Muster-Warenkörbe #1–#99:** fertige, wiederverwendbare Vorlagen, die mit aktuellen
+   Angeboten und regulären Shop-Preisen (Punkt 4) befüllt werden.
+   - Beispiele: #1 Wocheneinkauf aus höchstens drei Läden mit typischem Regelsortiment
+     (auch Produkte, die nie im Prospekt stehen); Outdoor-/Wander-Warenkorb mit
+     saisonalen Artikeln, die z. B. nur im Winter erhältlich sind und rund 50 Wochen im Jahr
+     in keinem Prospekt auftauchen.
+   - Eine Vorlage enthält **Produktarten** statt fester Artikel (z. B. „Vollmilch 1 l“,
+     „Handwärmer“), je Position Menge, optionale Preisobergrenze, Warengruppe und
+     Saison-Monate; dazu Gesamtbudget und maximale Anzahl Läden.
+   - Befüllen: je Position bestes aktuelles Angebot, sonst regulärer Shop-Preis; der
+     vorhandene Einkaufsplan wählt die günstigste Kombination aus höchstens N Läden.
+     Außerhalb der Saison wird eine Position als „derzeit nicht erhältlich“ markiert.
+   - Vorlagen als versionierte JSON-Dateien in der App (#1–#99), eigene Vorlagen anlegbar,
+     Export/Import über das vorhandene Backup. Später kann der Sprach-Kaufassistent
+     Vorlagen erstellen, anpassen und daraus Einkaufsliste und Route erzeugen.
 
 Kosten: GitHub Actions und Releases kostenlos (öffentliches Repository);
 Händlerdaten, Karten-Navigation und Widget ohne kostenpflichtige API.
