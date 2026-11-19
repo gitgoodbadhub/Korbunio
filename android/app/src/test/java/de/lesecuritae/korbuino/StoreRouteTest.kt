@@ -70,6 +70,7 @@ class StoreRouteTest {
     @Test fun `every registered retailer has an OpenStreetMap brand rule`() {
         val ids = de.lesecuritae.korbuino.providers.ProviderRegistry.default(OkHttpClient()).all().map { it.id }
         assertEquals(emptyList<String>(), ids.filterNot { it in StoreRoute.brands })
+        assertEquals(emptyList<String>(), ids.filterNot { it in StoreRoute.searchNames })
     }
 
     @Test fun `finder geocodes the postal code and reports retailers without a shop`() = runTest {
@@ -137,5 +138,13 @@ class StoreRouteTest {
         } finally {
             server.shutdown()
         }
+    }
+
+    @Test fun `map search links use plain shop names`() {
+        assertEquals("Lidl", StoreRoute.searchName("marktguru-lidl", "Lidl (regional)"))
+        assertEquals("Neuer Laden", StoreRoute.searchName("unknown", "Neuer Laden (regional)"))
+        assertEquals("https://www.google.com/maps/search/?api=1&query=KiK%2056068", StoreRoute.googleMapsSearchUrl("KiK", "56068"))
+        assertEquals("https://www.google.com/maps/search/?api=1&query=Lidl", StoreRoute.googleMapsSearchUrl("Lidl"))
+        assertEquals("geo:0,0?q=HOL%27AB%21", StoreRoute.geoSearchUri("HOL'AB!"))
     }
 }
