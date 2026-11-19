@@ -109,6 +109,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val secureStore = SecureStore(application)
     private val imageProvider = ProductImageProvider(NetworkClientFactory.create(application))
     private val imageCache = ImageCache.shared(application)
+    /** One finder per screen session so found shops are reused instead of asking OpenStreetMap again. */
+    private val storeFinder by lazy { StoreFinder(NetworkClientFactory.create(application)) }
     val state: StateFlow<MainUiState> = _state.asStateFlow()
 
     val retailers = listOf("all" to "Alle Händler") + registry.all().map { it.id to it.displayName }
@@ -226,7 +228,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (retailerIds.isEmpty()) { message("Für die Route zuerst Angebote in der Einkaufsliste auswählen"); return }
         _state.value = current.copy(storeRoute = StoreRouteUi(requested = true, loading = true))
         viewModelScope.launch {
-            val result = runCatching { StoreFinder(NetworkClientFactory.create(getApplication())).find(current.postalCode, retailerIds) }
+            val result = runCatching { storeFinder.find(current.postalCode, retailerIds) }
             _state.value = _state.value.copy(storeRoute = result.fold(
                 onSuccess = { StoreRouteUi(requested = true, stops = it.stops, missingRetailerIds = it.missingRetailerIds) },
                 onFailure = { StoreRouteUi(requested = true, error = it.message ?: "Filialsuche fehlgeschlagen") },

@@ -174,30 +174,65 @@ object StoreRoute {
     private fun enc(value: String) = URLEncoder.encode(value, "UTF-8").replace("+", "%20")
 }
 
-/** Network part: postal code via Nominatim, shops via one Overpass query. Both are public OpenStreetMap services. */
+/**
+ * Network part: postal code via Nominatim, shops via one Overpass query. Both are public OpenStreetMap services.
+ * Public Overpass servers are often overloaded (HTTP 429/502/503/504): the query then moves on to the next public
+ * instance. Results are kept in memory for [cacheMillis] so repeated taps do not query OpenStreetMap again.
+ */
 class StoreFinder(
     private val http: OkHttpClient,
     private val nominatimUrl: String = "https://nominatim.openstreetmap.org/search",
-    private val overpassUrl: String = "https://overpass-api.de/api/interpreter",
+    private val overpassUrls: List<String> = DEFAULT_OVERPASS_URLS,
+    private val cacheMillis: Long = 24 * 60 * 60 * 1000L,
+    private val now: () -> Long = System::currentTimeMillis,
 ) {
     private val userAgent = "Korbunio-Plus (+https://github.com/gitgoodbadhub/Korbunio)"
+    private val routes = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, StoreRouteResult>>()
+    private val postalPoints = java.util.concurrent.ConcurrentHashMap<String, Pair<Double, Double>>()
+
+    companion object {
+        /** Public Overpass instances listed on the OpenStreetMap wiki; tried in this order. */
+        val DEFAULT_OVERPASS_URLS = listOf(
+            "https://overpass-api.de/api/interpreter",
+            "https://overpass.private.coffee/api/interpreter",
+            "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+        )
+        private val retryableCodes = setOf(429, 500, 502, 503, 504)
+    }
 
     suspend fun find(postalCode: String, retailerIds: List<String>, radiusM: Int = StoreRoute.DEFAULT_RADIUS_M): StoreRouteResult =
         withContext(Dispatchers.IO) {
             require(Regex("\\d{5}").matches(postalCode)) { "Bitte zuerst eine fünfstellige Postleitzahl festlegen" }
             val known = retailerIds.distinct().filter { it in StoreRoute.brands }
             val unknown = retailerIds.distinct().filterNot { it in StoreRoute.brands }
-            val (lat, lon) = geocode(postalCode)
+            val key = "$postalCode|$radiusM|${known.sorted().joinToString(",")}"
+            routes[key]?.takeIf { now() - it.first < cacheMillis }?.let { return@withContext it.second.copy(missingRetailerIds = it.second.missingRetailerIds + unknown) }
+            val (lat, lon) = postalPoints[postalCode] ?: geocode(postalCode).also { postalPoints[postalCode] = it }
             val query = StoreRoute.overpassQuery(known, lat, lon, radiusM) ?: return@withContext StoreRouteResult(emptyList(), unknown)
-            val request = Request.Builder().url(overpassUrl).header("User-Agent", userAgent)
-                .post(FormBody.Builder().add("data", query).build()).build()
-            val body = http.newCall(request).execute().use { response ->
-                check(response.isSuccessful) { "Filialsuche (OpenStreetMap) HTTP ${response.code}" }
-                response.body?.string().orEmpty()
-            }
-            val nearest = StoreRoute.nearestPerRetailer(body, known, lat, lon)
-            StoreRouteResult(StoreRoute.order(nearest.values, lat, lon), known.filterNot { it in nearest } + unknown)
+            val nearest = StoreRoute.nearestPerRetailer(overpass(query), known, lat, lon)
+            val result = StoreRouteResult(StoreRoute.order(nearest.values, lat, lon), known.filterNot { it in nearest })
+            routes[key] = now() to result
+            result.copy(missingRetailerIds = result.missingRetailerIds + unknown)
         }
+
+    /** Tries each public Overpass instance; only overload and connection errors move on to the next one. */
+    private fun overpass(query: String): String {
+        var lastProblem = "keine Antwort"
+        for (url in overpassUrls) {
+            val request = Request.Builder().url(url).header("User-Agent", userAgent)
+                .post(FormBody.Builder().add("data", query).build()).build()
+            try {
+                http.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) return response.body?.string().orEmpty()
+                    if (response.code !in retryableCodes) error("Filialsuche (OpenStreetMap) HTTP ${response.code}")
+                    lastProblem = "HTTP ${response.code}"
+                }
+            } catch (io: java.io.IOException) {
+                lastProblem = io.javaClass.simpleName
+            }
+        }
+        error("Die OpenStreetMap-Filialsuche ist gerade überlastet ($lastProblem). Bitte in ein paar Minuten erneut versuchen.")
+    }
 
     private fun geocode(postalCode: String): Pair<Double, Double> {
         val url = nominatimUrl.toHttpUrl().newBuilder()
