@@ -23,6 +23,8 @@ class StoreRouteCardTest {
         compose.onNodeWithText("2. Woolworth").assertIsDisplayed()
         compose.onNodeWithTag("route-google-maps").assertIsDisplayed()
         compose.onNodeWithText("Ganze Route in Google Maps").assertIsDisplayed()
+        // The map itself needs GPU rendering; only its entry point is checked here.
+        compose.onNodeWithTag("route-show-map").assertIsDisplayed()
         compose.onNodeWithTag("route-missing").assert(hasText("KiK", substring = true))
         compose.onNodeWithTag("route-search-kik").assert(hasAnyDescendant(hasText("Google Maps")))
         compose.onAllNodesWithTag("route-search-marktguru-lidl").assertCountEquals(0)

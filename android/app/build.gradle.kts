@@ -20,6 +20,9 @@ android {
         versionCode = 83
         versionName = "0.1.83"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Korbunio Plus: the map library ships ~13 MB of native code per CPU type. 32-bit x86 is only used by
+        // old emulators; x86_64 stays for the CI emulator tests.
+        ndk { abiFilters += setOf("arm64-v8a", "armeabi-v7a", "x86_64") }
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -105,6 +108,8 @@ dependencies {
     implementation("org.unifiedpush.android:connector:3.3.5") { exclude(group = "com.google.crypto.tink", module = "tink") }
     implementation("com.google.crypto.tink:tink-android:1.23.0")
     implementation("org.jsoup:jsoup:1.23.2")
+    // Korbunio Plus: in-app map for the shopping route (open source, no Google services, no key).
+    implementation("org.maplibre.gl:android-sdk:13.7.1")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
