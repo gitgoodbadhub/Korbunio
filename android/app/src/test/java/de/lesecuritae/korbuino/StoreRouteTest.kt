@@ -81,7 +81,9 @@ class StoreRouteTest {
         try {
             server.enqueue(MockResponse().setBody("""[{"lat":"$lat","lon":"$lon"}]"""))
             server.enqueue(MockResponse().setBody(overpass))
-            val finder = StoreFinder(OkHttpClient(), server.url("/search").toString(), listOf(server.url("/interpreter").toString()))
+            server.enqueue(MockResponse().setBody("[]")) // Nominatim fallback search for KiK finds nothing
+            val finder = StoreFinder(OkHttpClient(), server.url("/search").toString(), listOf(server.url("/interpreter").toString()),
+                nominatimPauseMillis = 0)
             val result = finder.find("56068", listOf("marktguru-lidl", "kik", "unknown"))
             assertEquals(listOf("marktguru-lidl"), result.stops.map { it.retailerId })
             assertEquals(listOf("kik", "unknown"), result.missingRetailerIds)
@@ -119,8 +121,9 @@ class StoreRouteTest {
             server.enqueue(MockResponse().setBody("""[{"lat":"$lat","lon":"$lon"}]"""))
             server.enqueue(MockResponse().setResponseCode(502))
             server.enqueue(MockResponse().setResponseCode(504))
+            server.enqueue(MockResponse().setBody("[]")) // Nominatim fallback finds nothing either
             val finder = StoreFinder(OkHttpClient(), server.url("/search").toString(),
-                listOf(server.url("/a").toString(), server.url("/b").toString()))
+                listOf(server.url("/a").toString(), server.url("/b").toString()), nominatimPauseMillis = 0)
             val error = runCatching { finder.find("56068", listOf("rewe")) }.exceptionOrNull()
             assertTrue(error?.message.orEmpty().contains("überlastet (HTTP 504)"))
         } finally {
@@ -198,5 +201,54 @@ class StoreRouteTest {
         } finally {
             server.shutdown()
         }
+    }
+
+    private val nominatimShops = """[
+        {"category":"shop","type":"supermarket","name":"REWE","lat":"50.3700","lon":"7.6000",
+         "address":{"road":"Moselweißer Straße","house_number":"9","postcode":"56073","city":"Koblenz"}},
+        {"category":"shop","type":"supermarket","name":"REWE City","lat":"50.3580","lon":"7.5900","address":{"postcode":"56068","city":"Koblenz"}},
+        {"category":"amenity","type":"parking","name":"REWE Parkplatz","lat":"50.3569","lon":"7.5890"},
+        {"category":"shop","type":"bakery","name":"REWE Backstation","lat":"50.3569","lon":"7.5891"},
+        {"category":"shop","type":"supermarket","name":"Penny","lat":"50.3569","lon":"7.5892"}
+    ]"""
+
+    @Test fun `nominatim search answer gives the nearest matching shop`() {
+        val stop = StoreRoute.nearestFromNominatim(nominatimShops, "rewe", lat, lon)!!
+        assertEquals("REWE City", stop.name)
+        assertEquals(50.3580, stop.lat, 1e-9)
+        // Without a street the address stays empty and is filled later by the reverse lookup.
+        assertEquals("", stop.address)
+        assertNull(StoreRoute.nearestFromNominatim(nominatimShops, "kik", lat, lon))
+        assertNull(StoreRoute.nearestFromNominatim("kein json", "rewe", lat, lon))
+        val box = StoreRoute.viewbox(lat, lon, 10_000).split(',').map { it.toDouble() }
+        assertTrue(box[0] < lon && box[2] > lon && box[1] > lat && box[3] < lat)
+    }
+
+    @Test fun `overloaded overpass falls back to the nominatim shop search`() = runTest {
+        val server = MockWebServer().also { it.start() }
+        try {
+            server.enqueue(MockResponse().setBody("""[{"lat":"$lat","lon":"$lon"}]"""))
+            server.enqueue(MockResponse().setResponseCode(504))
+            server.enqueue(MockResponse().setBody(nominatimShops)) // REWE
+            server.enqueue(MockResponse().setBody(nominatimShops)) // Penny
+            val finder = StoreFinder(OkHttpClient(), server.url("/search").toString(), listOf(server.url("/a").toString()),
+                nominatimPauseMillis = 0)
+            val result = finder.find("56068", listOf("rewe", "marktguru-penny"))
+            assertEquals(setOf("rewe", "marktguru-penny"), result.stops.map { it.retailerId }.toSet())
+            assertEquals(emptyList<String>(), result.missingRetailerIds)
+            server.takeRequest(); server.takeRequest()
+            val search = server.takeRequest().requestUrl!!
+            assertEquals("REWE", search.queryParameter("q"))
+            assertEquals("1", search.queryParameter("bounded"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test fun `text route goes through all shops by name when no coordinates are known`() {
+        val url = URLDecoder.decode(StoreRoute.googleMapsTextRouteUrl(listOf("REWE", "Netto Marken-Discount", "REWE"), "56410")!!, "UTF-8")
+        assertTrue(url.contains("destination=Netto Marken-Discount 56410"))
+        assertTrue(url.contains("waypoints=REWE 56410"))
+        assertNull(StoreRoute.googleMapsTextRouteUrl(emptyList()))
     }
 }
