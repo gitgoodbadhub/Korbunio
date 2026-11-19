@@ -1,5 +1,11 @@
 package de.lesecuritae.korbuino
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,7 +21,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -32,6 +42,9 @@ import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.android.location.LocationComponentActivationOptions
+import org.maplibre.android.location.modes.CameraMode
+import org.maplibre.android.location.modes.RenderMode
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
@@ -47,6 +60,11 @@ internal const val STORE_MAP_STYLE = "https://tiles.openfreemap.org/styles/liber
 @Composable
 internal fun StoreMapDialog(stops: List<StoreStop>, retailerNames: Map<String, String>, onDismiss: () -> Unit) {
     val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
+    var showLocation by remember { mutableStateOf(hasLocationPermission(context)) }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        showLocation = result.values.any { it } || hasLocationPermission(context)
+    }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(modifier = Modifier.fillMaxSize().testTag("store-map-dialog")) {
             Column(Modifier.fillMaxSize()) {
@@ -54,7 +72,12 @@ internal fun StoreMapDialog(stops: List<StoreStop>, retailerNames: Map<String, S
                     Text("Filialen auf der Karte", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     TextButton(onClick = onDismiss, modifier = Modifier.testTag("store-map-close")) { Text("Schließen") }
                 }
-                Box(Modifier.weight(1f).fillMaxWidth()) { StoreMap(stops) }
+                Box(Modifier.weight(1f).fillMaxWidth()) { StoreMap(stops, showLocation) }
+                if (!showLocation) {
+                    TextButton(onClick = {
+                        permission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                    }, modifier = Modifier.padding(horizontal = 12.dp).testTag("store-map-my-location")) { Text("Meinen Standort anzeigen") }
+                }
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     stops.forEachIndexed { index, stop ->
                         Text("${index + 1}. ${retailerNames[stop.retailerId] ?: stop.name} · ${stop.address.ifBlank { stop.name }}",
@@ -69,9 +92,15 @@ internal fun StoreMapDialog(stops: List<StoreStop>, retailerNames: Map<String, S
     }
 }
 
-/** MapLibre view bound to the Compose lifecycle; the stops are drawn as numbered circles. */
+internal fun hasLocationPermission(context: Context): Boolean =
+    listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION).any {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+/** MapLibre view bound to the Compose lifecycle; the stops are drawn as numbered circles, the own position as blue dot. */
+@SuppressLint("MissingPermission") // only activated after hasLocationPermission()
 @Composable
-private fun StoreMap(stops: List<StoreStop>) {
+private fun StoreMap(stops: List<StoreStop>, showLocation: Boolean) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val mapView = remember {
@@ -96,7 +125,7 @@ private fun StoreMap(stops: List<StoreStop>) {
             mapView.onDestroy()
         }
     }
-    LaunchedEffect(mapView, stops) {
+    LaunchedEffect(mapView, stops, showLocation) {
         mapView.getMapAsync { map ->
             map.uiSettings.setRotateGesturesEnabled(false)
             map.uiSettings.setAttributionEnabled(true)
@@ -116,8 +145,21 @@ private fun StoreMap(stops: List<StoreStop>) {
                     PropertyFactory.textAllowOverlap(true),
                     PropertyFactory.textIgnorePlacement(true),
                 ))
-            map.setStyle(style) {
-                val points = stops.map { LatLng(it.lat, it.lon) }
+            map.setStyle(style) { loaded ->
+                // Own position: Android location service, no Google services; never fatal for the map.
+                val own = if (showLocation && hasLocationPermission(context)) runCatching {
+                    map.locationComponent.apply {
+                        activateLocationComponent(LocationComponentActivationOptions.builder(context, loaded)
+                            .useDefaultLocationEngine(true).build())
+                        setLocationComponentEnabled(true)
+                        setRenderMode(RenderMode.NORMAL)
+                        setCameraMode(CameraMode.NONE)
+                    }.lastKnownLocation?.let { LatLng(it.latitude, it.longitude) }
+                }.getOrNull() else null
+                val stopPoints = stops.map { LatLng(it.lat, it.lon) }
+                // Show the own position too when it is near the shops (not when the phone is far away).
+                val near = own?.takeIf { o -> stops.any { StoreRoute.distanceKm(o.latitude, o.longitude, it.lat, it.lon) < 30.0 } }
+                val points = stopPoints + listOfNotNull(near)
                 when {
                     points.isEmpty() -> Unit
                     points.distinct().size == 1 -> map.moveCamera(CameraUpdateFactory.newLatLngZoom(points.first(), 14.0))

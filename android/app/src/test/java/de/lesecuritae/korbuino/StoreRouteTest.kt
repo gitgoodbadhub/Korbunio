@@ -166,4 +166,37 @@ class StoreRouteTest {
         assertEquals("KiK \"Mitte\"", second["properties"]!!.jsonObject["name"]!!.jsonPrimitive.content)
         assertEquals("[]", kotlinx.serialization.json.Json.parseToJsonElement(StoreRoute.stopsGeoJson(emptyList())).jsonObject["features"].toString())
     }
+
+    @Test fun `nominatim reverse answer becomes a street address`() {
+        assertEquals("Warthestraße 4, 56410 Montabaur", StoreRoute.addressFromNominatim(
+            """{"address":{"road":"Warthestraße","house_number":"4","postcode":"56410","town":"Montabaur","country":"Deutschland"}}"""))
+        assertEquals("Hauptstraße, 56068 Koblenz", StoreRoute.addressFromNominatim(
+            """{"address":{"road":"Hauptstraße","postcode":"56068","city":"Koblenz"}}"""))
+        assertEquals("", StoreRoute.addressFromNominatim("""{"address":{"postcode":"56068"}}"""))
+        assertEquals("", StoreRoute.addressFromNominatim("""{"error":"Unable to geocode"}"""))
+        assertEquals("", StoreRoute.addressFromNominatim("kein json"))
+    }
+
+    @Test fun `shops without address tags get their address from a reverse lookup`() = runTest {
+        val server = MockWebServer().also { it.start() }
+        try {
+            server.enqueue(MockResponse().setBody("""[{"lat":"$lat","lon":"$lon"}]"""))
+            server.enqueue(MockResponse().setBody(overpass))
+            server.enqueue(MockResponse().setBody("""{"address":{"road":"Löhrstraße","house_number":"7","postcode":"56068","city":"Koblenz"}}"""))
+            server.enqueue(MockResponse().setResponseCode(500))
+            val finder = StoreFinder(OkHttpClient(), server.url("/search").toString(), listOf(server.url("/interpreter").toString()),
+                reverseUrl = server.url("/reverse").toString(), nominatimPauseMillis = 0)
+            val result = finder.find("56068", listOf("marktguru-lidl", "woolworth", "aldi-sued"))
+            val byId = result.stops.associateBy { it.retailerId }
+            // Lidl has address tags, Woolworth is the next stop and gets the reverse address, ALDI's lookup fails.
+            assertEquals("Hauptstraße 1, 56068 Koblenz", byId.getValue("marktguru-lidl").address)
+            assertEquals("Löhrstraße 7, 56068 Koblenz", byId.getValue("woolworth").address)
+            assertEquals("", byId.getValue("aldi-sued").address)
+            assertEquals(4, server.requestCount)
+            val paths = (1..4).map { server.takeRequest().requestUrl!!.encodedPath }
+            assertEquals(listOf("/search", "/interpreter", "/reverse", "/reverse"), paths)
+        } finally {
+            server.shutdown()
+        }
+    }
 }
