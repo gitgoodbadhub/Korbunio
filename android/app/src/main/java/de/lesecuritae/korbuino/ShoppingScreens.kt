@@ -95,7 +95,7 @@ internal fun ShoppingListContent(
                 }
             }
             if (state.storeRoute.requested) item(key = "route") {
-                StoreRouteCard(state.storeRoute, retailerNames, onClose = actions.clearRoute)
+                StoreRouteCard(state.storeRoute, retailerNames, onClose = actions.clearRoute, postalCode = state.postalCode)
             }
             groups.forEach { (group, rows) ->
                 val label = when {

@@ -226,12 +226,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val current = _state.value
         if (current.storeRoute.loading) return
         if (retailerIds.isEmpty()) { message("Für die Route zuerst Angebote in der Einkaufsliste auswählen"); return }
-        _state.value = current.copy(storeRoute = StoreRouteUi(requested = true, loading = true))
+        _state.value = current.copy(storeRoute = StoreRouteUi(requested = true, loading = true, retailerIds = retailerIds))
         viewModelScope.launch {
             val result = runCatching { storeFinder.find(current.postalCode, retailerIds) }
             _state.value = _state.value.copy(storeRoute = result.fold(
-                onSuccess = { StoreRouteUi(requested = true, stops = it.stops, missingRetailerIds = it.missingRetailerIds) },
-                onFailure = { StoreRouteUi(requested = true, error = it.message ?: "Filialsuche fehlgeschlagen") },
+                onSuccess = { StoreRouteUi(requested = true, retailerIds = retailerIds, stops = it.stops, missingRetailerIds = it.missingRetailerIds) },
+                onFailure = { StoreRouteUi(requested = true, retailerIds = retailerIds, error = it.message ?: "Filialsuche fehlgeschlagen") },
             ))
         }
     }

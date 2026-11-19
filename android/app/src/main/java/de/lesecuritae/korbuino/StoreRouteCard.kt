@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
 
 /** Shops of the shopping plan in visiting order, with one map link per stop and the whole trip for Google Maps. */
 @Composable
-internal fun StoreRouteCard(route: StoreRouteUi, retailerNames: Map<String, String>, onClose: () -> Unit) {
+internal fun StoreRouteCard(route: StoreRouteUi, retailerNames: Map<String, String>, onClose: () -> Unit, postalCode: String = "") {
     val uriHandler = LocalUriHandler.current
     fun open(uri: String?) { if (uri != null) runCatching { uriHandler.openUri(uri) } }
     Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth().testTag("route-card")) {
@@ -34,7 +34,10 @@ internal fun StoreRouteCard(route: StoreRouteUi, retailerNames: Map<String, Stri
                     CircularProgressIndicator()
                     Text("Suche die nächsten Filialen …")
                 }
-                route.error != null -> Text(route.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("route-error"))
+                route.error != null -> {
+                    Text(route.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("route-error"))
+                    MapSearchRows(route.retailerIds, retailerNames, postalCode, ::open)
+                }
                 else -> {
                     if (route.stops.isEmpty()) Text("Keine passende Filiale im Umkreis von 10 km gefunden.")
                     route.stops.forEachIndexed { index, stop ->
@@ -60,11 +63,27 @@ internal fun StoreRouteCard(route: StoreRouteUi, retailerNames: Map<String, Stri
                     if (route.missingRetailerIds.isNotEmpty()) {
                         Text("Keine Filiale in der Nähe gefunden: " + route.missingRetailerIds.joinToString { retailerNames[it] ?: it },
                             style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("route-missing"))
+                        MapSearchRows(route.missingRetailerIds, retailerNames, postalCode, ::open)
                     }
                     Text("Filialdaten: © OpenStreetMap-Mitwirkende. Entfernung ab dem Mittelpunkt der Postleitzahl; die Route startet am aktuellen Standort.",
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+        }
+    }
+}
+
+/** Manual fallback: let Google Maps or any map app search the shop itself (no key, works without the OSM shop search). */
+@Composable
+private fun MapSearchRows(retailerIds: List<String>, retailerNames: Map<String, String>, postalCode: String, open: (String?) -> Unit) {
+    if (retailerIds.isEmpty()) return
+    Text("Filiale selbst in einer Karten-App suchen:", style = MaterialTheme.typography.titleSmall, modifier = Modifier.testTag("route-map-search"))
+    retailerIds.distinct().forEach { id ->
+        val shop = StoreRoute.searchName(id, retailerNames[id] ?: id)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().testTag("route-search-$id")) {
+            Text(shop, modifier = Modifier.weight(1f))
+            TextButton(onClick = { open(StoreRoute.googleMapsSearchUrl(shop, postalCode)) }) { Text("Google Maps") }
+            TextButton(onClick = { open(StoreRoute.geoSearchUri(shop)) }) { Text("Karten-App") }
         }
     }
 }

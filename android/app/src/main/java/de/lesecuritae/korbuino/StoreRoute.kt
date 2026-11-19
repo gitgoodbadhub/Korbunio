@@ -29,6 +29,8 @@ data class StoreStop(
 data class StoreRouteUi(
     val requested: Boolean = false,
     val loading: Boolean = false,
+    /** Retailers of the shopping plan this route was asked for; offered for a manual map search. */
+    val retailerIds: List<String> = emptyList(),
     val stops: List<StoreStop> = emptyList(),
     val missingRetailerIds: List<String> = emptyList(),
     val error: String? = null,
@@ -78,6 +80,26 @@ object StoreRoute {
         "kik" to Brand("^KiK", nonFood),
         "woolworth" to Brand("^Woolworth", nonFood),
     )
+
+    /** Plain shop name for a search in a map app (display names may carry suffixes such as "(regional)"). */
+    val searchNames: Map<String, String> = mapOf(
+        "rewe" to "REWE", "globus" to "Globus", "aldi-nord" to "ALDI Nord", "aldi-sued" to "ALDI SÜD",
+        "kaufland" to "Kaufland", "edeka" to "EDEKA", "marktguru-lidl" to "Lidl", "marktguru-penny" to "PENNY",
+        "netto-marken" to "Netto Marken-Discount", "netto-schwarz" to "Netto Scottie", "marktguru-famila-nordwest" to "famila",
+        "marktguru-combi" to "Combi", "aktiv-irma" to "aktiv & irma", "holab" to "HOL'AB!", "trinkgut" to "trinkgut",
+        "dm" to "dm-drogerie markt", "rossmann" to "Rossmann", "mueller" to "Müller Drogerie",
+        "action" to "Action", "kodi" to "KODi", "kik" to "KiK", "woolworth" to "Woolworth",
+    )
+
+    fun searchName(retailerId: String, fallback: String = retailerId): String =
+        searchNames[retailerId] ?: fallback.replace(Regex("\\s*\\(.*\\)$"), "").trim()
+
+    /** Google Maps search for a shop near the postal code; the Maps app opens it when installed. */
+    fun googleMapsSearchUrl(shopName: String, postalCode: String = ""): String =
+        "https://www.google.com/maps/search/?api=1&query=" + enc("$shopName $postalCode".trim())
+
+    /** geo: search Android hands to any map app (Organic Maps, OsmAnd, Google Maps …); it searches around the current position. */
+    fun geoSearchUri(shopName: String): String = "geo:0,0?q=" + enc(shopName)
 
     /** One Overpass query for all retailers: shops whose brand or name matches, within [radiusM] of the point. */
     fun overpassQuery(retailerIds: Collection<String>, lat: Double, lon: Double, radiusM: Int = DEFAULT_RADIUS_M): String? {

@@ -24,13 +24,19 @@ class StoreRouteCardTest {
         compose.onNodeWithTag("route-google-maps").assertIsDisplayed()
         compose.onNodeWithText("Ganze Route in Google Maps").assertIsDisplayed()
         compose.onNodeWithTag("route-missing").assert(hasText("KiK", substring = true))
+        compose.onNodeWithTag("route-search-kik").assert(hasAnyDescendant(hasText("Google Maps")))
+        compose.onAllNodesWithTag("route-search-marktguru-lidl").assertCountEquals(0)
         compose.onNodeWithTag("route-close").performClick()
         compose.runOnIdle { assertTrue(closed) }
     }
 
     @Test fun errorIsShownInsteadOfStops() {
-        compose.setContent { MaterialTheme { StoreRouteCard(StoreRouteUi(requested = true, error = "PLZ-Suche (OpenStreetMap) HTTP 503"), names, onClose = {}) } }
+        compose.setContent { MaterialTheme { StoreRouteCard(StoreRouteUi(requested = true, retailerIds = listOf("marktguru-lidl", "kik"),
+            error = "PLZ-Suche (OpenStreetMap) HTTP 503"), names, onClose = {}, postalCode = "56068") } }
         compose.onNodeWithTag("route-error").assertIsDisplayed()
+        // Without the OSM shop search every retailer of the plan can still be searched in a map app.
+        compose.onNodeWithTag("route-search-marktguru-lidl").assert(hasAnyDescendant(hasText("Lidl")))
+        compose.onNodeWithTag("route-search-kik").assert(hasAnyDescendant(hasText("Karten-App")))
         compose.onAllNodesWithTag("route-google-maps").assertCountEquals(0)
     }
 }
