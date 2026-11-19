@@ -172,6 +172,16 @@ object StoreRoute {
         return "geo:${point(stop)}?q=${point(stop)}(${enc(label)})"
     }
 
+    /** "Straße Nr, PLZ Ort" from a Nominatim reverse answer, or "" when it has no usable street. */
+    fun addressFromNominatim(json: String): String {
+        val address = runCatching { Json.parseToJsonElement(json).jsonObject["address"]?.jsonObject }.getOrNull() ?: return ""
+        val road = address.text("road") ?: address.text("pedestrian") ?: address.text("square") ?: return ""
+        val street = listOfNotNull(road, address.text("house_number")).joinToString(" ")
+        val town = address.text("city") ?: address.text("town") ?: address.text("village") ?: address.text("municipality")
+        val place = listOfNotNull(address.text("postcode"), town).joinToString(" ")
+        return listOf(street, place).filter { it.isNotBlank() }.joinToString(", ")
+    }
+
     /** Stops as GeoJSON points for the in-app map; "n" is the visiting number shown in the marker. */
     fun stopsGeoJson(stops: List<StoreStop>): String = buildJsonObject {
         put("type", JsonPrimitive("FeatureCollection"))
@@ -231,6 +241,9 @@ class StoreFinder(
     private val overpassUrls: List<String> = DEFAULT_OVERPASS_URLS,
     private val cacheMillis: Long = 24 * 60 * 60 * 1000L,
     private val now: () -> Long = System::currentTimeMillis,
+    private val reverseUrl: String = "https://nominatim.openstreetmap.org/reverse",
+    /** Nominatim allows one request per second; tests pass 0. */
+    private val nominatimPauseMillis: Long = 1100,
 ) {
     private val userAgent = "Korbunio-Plus (+https://github.com/gitgoodbadhub/Korbunio)"
     private val routes = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, StoreRouteResult>>()
@@ -256,7 +269,10 @@ class StoreFinder(
             val (lat, lon) = postalPoints[postalCode] ?: geocode(postalCode).also { postalPoints[postalCode] = it }
             val query = StoreRoute.overpassQuery(known, lat, lon, radiusM) ?: return@withContext StoreRouteResult(emptyList(), unknown)
             val nearest = StoreRoute.nearestPerRetailer(overpass(query), known, lat, lon)
-            val result = StoreRouteResult(StoreRoute.order(nearest.values, lat, lon), known.filterNot { it in nearest })
+            val ordered = StoreRoute.order(nearest.values, lat, lon).map { stop ->
+                if (stop.address.isNotBlank()) stop else stop.copy(address = reverseAddress(stop.lat, stop.lon))
+            }
+            val result = StoreRouteResult(ordered, known.filterNot { it in nearest })
             routes[key] = now() to result
             result.copy(missingRetailerIds = result.missingRetailerIds + unknown)
         }
@@ -278,6 +294,21 @@ class StoreFinder(
             }
         }
         error("Die OpenStreetMap-Filialsuche ist gerade überlastet ($lastProblem). Bitte in ein paar Minuten erneut versuchen.")
+    }
+
+    /** Street address for a shop without address tags; failures only leave the address empty. */
+    private suspend fun reverseAddress(lat: Double, lon: Double): String {
+        kotlinx.coroutines.delay(nominatimPauseMillis)
+        return runCatching { reverseAddressNow(lat, lon) }.getOrDefault("")
+    }
+
+    private fun reverseAddressNow(lat: Double, lon: Double): String {
+        val url = reverseUrl.toHttpUrl().newBuilder()
+            .addQueryParameter("lat", lat.toString()).addQueryParameter("lon", lon.toString())
+            .addQueryParameter("format", "jsonv2").addQueryParameter("zoom", "18").addQueryParameter("addressdetails", "1").build()
+        return http.newCall(Request.Builder().url(url).header("User-Agent", userAgent).build()).execute().use { response ->
+            if (!response.isSuccessful) "" else StoreRoute.addressFromNominatim(response.body?.string().orEmpty())
+        }
     }
 
     private fun geocode(postalCode: String): Pair<Double, Double> {
