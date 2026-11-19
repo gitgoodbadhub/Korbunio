@@ -7,6 +7,9 @@ import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Test
 import java.net.URLDecoder
 
@@ -146,5 +149,21 @@ class StoreRouteTest {
         assertEquals("https://www.google.com/maps/search/?api=1&query=KiK%2056068", StoreRoute.googleMapsSearchUrl("KiK", "56068"))
         assertEquals("https://www.google.com/maps/search/?api=1&query=Lidl", StoreRoute.googleMapsSearchUrl("Lidl"))
         assertEquals("geo:0,0?q=HOL%27AB%21", StoreRoute.geoSearchUri("HOL'AB!"))
+    }
+
+    @Test fun `map points are GeoJSON in longitude-latitude order with visiting numbers`() {
+        val json = kotlinx.serialization.json.Json.parseToJsonElement(StoreRoute.stopsGeoJson(listOf(
+            StoreStop("marktguru-lidl", "Lidl", "", 50.36, 7.59, 0.4),
+            StoreStop("kik", "KiK \"Mitte\"", "", 50.37, 7.60, 1.0),
+        ))).jsonObject
+        assertEquals("FeatureCollection", json["type"]!!.jsonPrimitive.content)
+        val features = json["features"]!!.jsonArray
+        assertEquals(2, features.size)
+        val second = features[1].jsonObject
+        val coordinates = second["geometry"]!!.jsonObject["coordinates"]!!.jsonArray.map { it.jsonPrimitive.content.toDouble() }
+        assertEquals(listOf(7.60, 50.37), coordinates)
+        assertEquals("2", second["properties"]!!.jsonObject["n"]!!.jsonPrimitive.content)
+        assertEquals("KiK \"Mitte\"", second["properties"]!!.jsonObject["name"]!!.jsonPrimitive.content)
+        assertEquals("[]", kotlinx.serialization.json.Json.parseToJsonElement(StoreRoute.stopsGeoJson(emptyList())).jsonObject["features"].toString())
     }
 }

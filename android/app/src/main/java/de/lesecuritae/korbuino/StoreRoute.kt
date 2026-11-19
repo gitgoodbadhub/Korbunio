@@ -3,6 +3,9 @@ package de.lesecuritae.korbuino
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -168,6 +171,27 @@ object StoreRoute {
         val label = "${stop.name} ${stop.address}".trim().replace(Regex("[()]"), " ")
         return "geo:${point(stop)}?q=${point(stop)}(${enc(label)})"
     }
+
+    /** Stops as GeoJSON points for the in-app map; "n" is the visiting number shown in the marker. */
+    fun stopsGeoJson(stops: List<StoreStop>): String = buildJsonObject {
+        put("type", JsonPrimitive("FeatureCollection"))
+        put("features", JsonArray(stops.mapIndexed { index, stop ->
+            buildJsonObject {
+                put("type", JsonPrimitive("Feature"))
+                put("geometry", buildJsonObject {
+                    put("type", JsonPrimitive("Point"))
+                    // GeoJSON order is longitude, latitude.
+                    put("coordinates", JsonArray(listOf(
+                        JsonPrimitive(stop.lon), JsonPrimitive(stop.lat))))
+                })
+                put("properties", buildJsonObject {
+                    put("n", JsonPrimitive((index + 1).toString()))
+                    put("name", JsonPrimitive(stop.name))
+                    put("retailer", JsonPrimitive(stop.retailerId))
+                })
+            }
+        }))
+    }.toString()
 
     fun distanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
         val dLat = Math.toRadians(lat2 - lat1)

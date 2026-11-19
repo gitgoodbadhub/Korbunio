@@ -12,6 +12,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
@@ -22,6 +26,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun StoreRouteCard(route: StoreRouteUi, retailerNames: Map<String, String>, onClose: () -> Unit, postalCode: String = "") {
     val uriHandler = LocalUriHandler.current
+    var showMap by remember { mutableStateOf(false) }
     fun open(uri: String?) { if (uri != null) runCatching { uriHandler.openUri(uri) } }
     Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth().testTag("route-card")) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -54,6 +59,8 @@ internal fun StoreRouteCard(route: StoreRouteUi, retailerNames: Map<String, Stri
                         Button(onClick = { open(StoreRoute.googleMapsUrl(route.stops)) }, modifier = Modifier.testTag("route-google-maps")) {
                             Text(if (route.stops.size > 1) "Ganze Route in Google Maps" else "In Google Maps öffnen")
                         }
+                        TextButton(onClick = { showMap = true }, modifier = Modifier.testTag("route-show-map")) { Text("Karte anzeigen") }
+                        if (showMap) StoreMapDialog(route.stops, retailerNames, onDismiss = { showMap = false })
                         if (route.stops.size > StoreRoute.MAX_STOPS) {
                             Text("Google Maps übernimmt höchstens ${StoreRoute.MAX_STOPS} Stopps.", style = MaterialTheme.typography.bodySmall)
                         }
