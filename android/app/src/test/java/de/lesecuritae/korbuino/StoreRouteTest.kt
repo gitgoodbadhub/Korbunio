@@ -77,7 +77,7 @@ class StoreRouteTest {
         try {
             server.enqueue(MockResponse().setBody("""[{"lat":"$lat","lon":"$lon"}]"""))
             server.enqueue(MockResponse().setBody(overpass))
-            val finder = StoreFinder(OkHttpClient(), server.url("/search").toString(), server.url("/interpreter").toString())
+            val finder = StoreFinder(OkHttpClient(), server.url("/search").toString(), listOf(server.url("/interpreter").toString()))
             val result = finder.find("56068", listOf("marktguru-lidl", "kik", "unknown"))
             assertEquals(listOf("marktguru-lidl"), result.stops.map { it.retailerId })
             assertEquals(listOf("kik", "unknown"), result.missingRetailerIds)
@@ -85,6 +85,55 @@ class StoreRouteTest {
             val overpassRequest = server.takeRequest()
             assertEquals("POST", overpassRequest.method)
             assertTrue(overpassRequest.getHeader("User-Agent")!!.startsWith("Korbunio-Plus"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test fun `overloaded overpass server falls back to the next one and results are cached`() = runTest {
+        val server = MockWebServer().also { it.start() }
+        try {
+            server.enqueue(MockResponse().setBody("""[{"lat":"$lat","lon":"$lon"}]"""))
+            server.enqueue(MockResponse().setResponseCode(502))
+            server.enqueue(MockResponse().setBody(overpass))
+            val finder = StoreFinder(OkHttpClient(), server.url("/search").toString(),
+                listOf(server.url("/main").toString(), server.url("/mirror").toString()))
+            val first = finder.find("56068", listOf("marktguru-lidl"))
+            assertEquals(listOf("marktguru-lidl"), first.stops.map { it.retailerId })
+            assertEquals(listOf("/search", "/main", "/mirror"), (1..3).map { server.takeRequest().requestUrl!!.encodedPath })
+            // Same postal code and retailers again: answered from memory, no further request.
+            assertEquals(first, finder.find("56068", listOf("marktguru-lidl")))
+            assertEquals(3, server.requestCount)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test fun `all overpass servers overloaded gives a clear retry message`() = runTest {
+        val server = MockWebServer().also { it.start() }
+        try {
+            server.enqueue(MockResponse().setBody("""[{"lat":"$lat","lon":"$lon"}]"""))
+            server.enqueue(MockResponse().setResponseCode(502))
+            server.enqueue(MockResponse().setResponseCode(504))
+            val finder = StoreFinder(OkHttpClient(), server.url("/search").toString(),
+                listOf(server.url("/a").toString(), server.url("/b").toString()))
+            val error = runCatching { finder.find("56068", listOf("rewe")) }.exceptionOrNull()
+            assertTrue(error?.message.orEmpty().contains("überlastet (HTTP 504)"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test fun `a broken query is not retried on other servers`() = runTest {
+        val server = MockWebServer().also { it.start() }
+        try {
+            server.enqueue(MockResponse().setBody("""[{"lat":"$lat","lon":"$lon"}]"""))
+            server.enqueue(MockResponse().setResponseCode(400))
+            val finder = StoreFinder(OkHttpClient(), server.url("/search").toString(),
+                listOf(server.url("/a").toString(), server.url("/b").toString()))
+            val error = runCatching { finder.find("56068", listOf("rewe")) }.exceptionOrNull()
+            assertEquals("Filialsuche (OpenStreetMap) HTTP 400", error?.message)
+            assertEquals(2, server.requestCount)
         } finally {
             server.shutdown()
         }
