@@ -6,6 +6,20 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /** Small, shared parsers for retailer and Marktguru response variants. */
 internal object ProviderParsing {
+    private val brandPlaceholders = setOf(
+        "this is no brand", "thisisnobrand", "no brand", "without brand", "unbranded", "brandless",
+        "ohne marke", "keine marke", "markenlos",
+    )
+
+    /** Usable brand name, or "" for source placeholders such as Woolworth's "thisisnobrand" (as in common.clean_brand). */
+    fun cleanBrand(value: String?): String {
+        val text = value.orEmpty().replace(Regex("\\s+"), " ").trim()
+        val folded = java.text.Normalizer.normalize(text.lowercase(java.util.Locale.ROOT), java.text.Normalizer.Form.NFKD)
+            .replace(Regex("[^a-z0-9]+"), " ").trim().replace(Regex(" +"), " ")
+        val compact = folded.replace(" ", "")
+        return if (folded in brandPlaceholders || Regex("thisisnobrand\\d*").matches(compact)) "" else text
+    }
+
     fun cents(value: Double): Int {
         require(value.isFinite() && value >= 0) { "Ungültiger Preis" }
         return java.math.BigDecimal.valueOf(value).movePointRight(2)
