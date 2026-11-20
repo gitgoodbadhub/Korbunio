@@ -105,12 +105,15 @@ object StoreRoute {
     fun geoSearchUri(shopName: String): String = "geo:0,0?q=" + enc(shopName)
 
     /** One Overpass query for all retailers: shops whose brand or name matches, within [radiusM] of the point. */
+    const val OVERPASS_SERVER_TIMEOUT_S = 12
+
     fun overpassQuery(retailerIds: Collection<String>, lat: Double, lon: Double, radiusM: Int = DEFAULT_RADIUS_M): String? {
         val patterns = retailerIds.mapNotNull { brands[it]?.pattern }.distinct()
         if (patterns.isEmpty()) return null
         val around = "(around:$radiusM,${coord(lat)},${coord(lon)})"
         val parts = patterns.flatMap { p -> listOf("""nwr["shop"]["brand"~"$p",i]$around;""", """nwr["shop"]["name"~"$p",i]$around;""") }
-        return "[out:json][timeout:25];(${parts.joinToString("")});out center tags;"
+        // A short server timeout lets a busy instance refuse quickly instead of keeping the user waiting.
+        return "[out:json][timeout:$OVERPASS_SERVER_TIMEOUT_S];(${parts.joinToString("")});out center tags;"
     }
 
     /** Nearest matching shop per retailer from an Overpass JSON answer. */
@@ -287,6 +290,10 @@ class StoreFinder(
     private val reverseUrl: String = "https://nominatim.openstreetmap.org/reverse",
     /** Nominatim allows one request per second; tests pass 0. */
     private val nominatimPauseMillis: Long = 1100,
+    /** Longest wait for one Overpass instance; a slow one is skipped for the next. */
+    private val overpassTimeoutMillis: Long = 12_000,
+    /** Overall time for all Overpass instances; afterwards the quicker Nominatim search takes over. */
+    private val overpassBudgetMillis: Long = 20_000,
 ) {
     private val userAgent = "Korbunio-Plus (+https://github.com/gitgoodbadhub/Korbunio)"
     private val routes = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, StoreRouteResult>>()
@@ -334,11 +341,18 @@ class StoreFinder(
     /** Tries each public Overpass instance; only overload and connection errors move on to the next one. */
     private fun overpass(query: String): String {
         var lastProblem = "keine Antwort"
+        val deadline = System.nanoTime() + overpassBudgetMillis * 1_000_000
         for (url in overpassUrls) {
+            val remaining = (deadline - System.nanoTime()) / 1_000_000
+            if (remaining <= 0) { lastProblem = "Zeitlimit"; break }
+            val client = http.newBuilder()
+                .callTimeout(minOf(overpassTimeoutMillis, remaining), java.util.concurrent.TimeUnit.MILLISECONDS)
+                .readTimeout(minOf(overpassTimeoutMillis, remaining), java.util.concurrent.TimeUnit.MILLISECONDS)
+                .build()
             val request = Request.Builder().url(url).header("User-Agent", userAgent)
                 .post(FormBody.Builder().add("data", query).build()).build()
             try {
-                http.newCall(request).execute().use { response ->
+                client.newCall(request).execute().use { response ->
                     if (response.isSuccessful) return response.body?.string().orEmpty()
                     if (response.code !in retryableCodes) error("Filialsuche (OpenStreetMap) HTTP ${response.code}")
                     lastProblem = "HTTP ${response.code}"

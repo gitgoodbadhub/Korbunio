@@ -251,4 +251,22 @@ class StoreRouteTest {
         assertTrue(url.contains("waypoints=REWE 56410"))
         assertNull(StoreRoute.googleMapsTextRouteUrl(emptyList()))
     }
+
+    @Test fun `a slow Overpass instance is skipped quickly for the next one`() = runTest {
+        val server = MockWebServer().also { it.start() }
+        try {
+            server.enqueue(MockResponse().setBody("""[{"lat":"$lat","lon":"$lon"}]"""))
+            server.enqueue(MockResponse().setBody(overpass).setHeadersDelay(3, java.util.concurrent.TimeUnit.SECONDS))
+            server.enqueue(MockResponse().setBody(overpass))
+            val finder = StoreFinder(OkHttpClient(), server.url("/search").toString(),
+                listOf(server.url("/slow").toString(), server.url("/fast").toString()),
+                nominatimPauseMillis = 0, overpassTimeoutMillis = 500, overpassBudgetMillis = 5_000)
+            val started = System.currentTimeMillis()
+            val result = finder.find("56068", listOf("marktguru-lidl"))
+            assertEquals(listOf("marktguru-lidl"), result.stops.map { it.retailerId })
+            assertTrue("took ${System.currentTimeMillis() - started} ms", System.currentTimeMillis() - started < 2_500)
+        } finally {
+            server.shutdown()
+        }
+    }
 }
