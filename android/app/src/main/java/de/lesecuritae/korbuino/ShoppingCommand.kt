@@ -78,6 +78,27 @@ object ShoppingCommand {
         }
     }
 
+    private val sentenceWords = Regex(
+        """\b(ich|wir|mache|machen|koche|kochen|backe|backen|grille|grillen|für|fuer|zum|zur|mit|gäste|gaeste|party|""" +
+            """frühstück|fruehstueck|abendessen|mittagessen|wochenende|morgen|heute|rezept|geburtstag|feier|picknick)\b"""
+    )
+
+    /**
+     * True when the rules probably did not get the meaning: nothing understood, or a whole sentence without
+     * a command word ("Ich mache Pfannkuchen für vier") that would otherwise be read as a product list.
+     * A plain list ("Milch, Butter und Eier") stays with the rules.
+     */
+    fun needsHelp(text: String): Boolean {
+        val command = parse(text)
+        if (command is Command.Unknown) return text.isNotBlank()
+        val t = " " + text.lowercase() + " "
+        val hasCommandWord = removeVerbs.containsMatchIn(t) || routeWords.containsMatchIn(t) || listWords.containsMatchIn(t) ||
+            addWords.containsMatchIn(t) || searchWords.containsMatchIn(t)
+        if (hasCommandWord) return false
+        val parts = t.split(Regex("""\s*(?:,|\bund\b|\bsowie\b)\s*""")).filter { it.isNotBlank() }
+        return sentenceWords.containsMatchIn(t) || parts.any { it.trim().split(Regex("""\s+""")).size > 3 }
+    }
+
     private val fillers = Regex(
         """\b(bitte|mal|noch|doch|auch|mir|mich|uns|ich|wir|du|kannst|könntest|koenntest|würdest|wuerdest|möchte|moechte|will|""" +
             """hätte|haette|gern|gerne|bitte|zur|zum|die|den|der|das|dem|des|auf|in|im|von|vom|liste|einkaufsliste|einkaufszettel|""" +

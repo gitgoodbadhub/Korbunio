@@ -63,4 +63,15 @@ class ShoppingCommandTest {
         assertTrue(parse("") is Command.Unknown)
         assertTrue(parse("Füge hinzu") is Command.Unknown)
     }
+
+    @Test fun `whole sentences without a command word need the language model`() {
+        assertTrue(ShoppingCommand.needsHelp("Pfannkuchen für vier"))
+        assertTrue(ShoppingCommand.needsHelp("Ich mache am Wochenende einen Grillabend"))
+        assertTrue(ShoppingCommand.needsHelp("bitte"))
+        assertTrue(!ShoppingCommand.needsHelp("Milch und Brot"))
+        assertTrue(!ShoppingCommand.needsHelp("Milch, Butter und Eier"))
+        assertTrue(!ShoppingCommand.needsHelp("Füge Klopapier für höchstens 3 Euro hinzu"))
+        assertTrue(!ShoppingCommand.needsHelp("Wo muss ich hin?"))
+        assertTrue(!ShoppingCommand.needsHelp(""))
+    }
 }

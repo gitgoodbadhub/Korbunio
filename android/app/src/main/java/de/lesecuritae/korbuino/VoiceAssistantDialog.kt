@@ -14,6 +14,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,10 +42,42 @@ internal fun VoiceAssistantDialog(
     onListenAgain: () -> Unit,
     onDismiss: () -> Unit,
     onConfirm: (VoiceAssistant.Plan) -> Unit,
+    ai: OnDeviceAi = NoOnDeviceAi,
 ) {
     var text by remember(initialText) { mutableStateOf(initialText) }
-    val plan = remember(text, offers, shoppingItems, loyaltyPrograms) {
-        VoiceAssistant.plan(ShoppingCommand.parse(text), offers, shoppingItems, loyaltyPrograms, today)
+    // Gemini Nano (where the phone has it): its reading replaces the rule-based one until the text is edited.
+    var aiStatus by remember { mutableStateOf(OnDeviceAi.Status.UNAVAILABLE) }
+    var aiCommand by remember(initialText) { mutableStateOf<ShoppingCommand.Command?>(null) }
+    var aiBusy by remember { mutableStateOf(false) }
+    var aiNote by remember(initialText) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val ruleCommand = remember(text) { ShoppingCommand.parse(text) }
+    val plan = remember(aiCommand, ruleCommand, offers, shoppingItems, loyaltyPrograms) {
+        VoiceAssistant.plan(aiCommand ?: ruleCommand, offers, shoppingItems, loyaltyPrograms, today)
+    }
+    val askNano: () -> Unit = {
+        val asked = text
+        if (!aiBusy && asked.isNotBlank()) {
+            aiBusy = true; aiNote = null
+            scope.launch {
+                val command = ai.generate(NanoCommand.prompt(asked))?.let(NanoCommand::parse)
+                aiBusy = false
+                if (text == asked) {
+                    if (command != null) aiCommand = command
+                    else aiNote = "Gemini Nano hat keine verwertbare Antwort gegeben."
+                }
+            }
+        }
+    }
+    LaunchedEffect(ai) { aiStatus = ai.status() }
+    // What the rules cannot read, or whole sentences without a command word, go to Gemini Nano straight away.
+    // Asked automatically at most once per sentence: effects can be relaunched, the on-device quota is limited.
+    var autoAsked by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(aiStatus, initialText) {
+        if (aiStatus == OnDeviceAi.Status.AVAILABLE && autoAsked != text && ShoppingCommand.needsHelp(text)) {
+            autoAsked = text
+            askNano()
+        }
     }
     val runnable = when (plan) {
         is VoiceAssistant.Plan.Unknown -> false
@@ -60,11 +95,15 @@ internal fun VoiceAssistantDialog(
                 modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
             ) {
                 OutlinedTextField(
-                    value = text, onValueChange = { text = it.take(300) },
+                    value = text, onValueChange = { text = it.take(300); aiCommand = null; aiNote = null },
                     label = { Text("Verstanden") }, modifier = Modifier.fillMaxWidth().testTag("voice-text"),
                 )
                 Text(VoiceAssistant.describe(plan, retailerNames), fontWeight = FontWeight.Bold,
                     modifier = Modifier.testTag("voice-summary"))
+                NanoRow(aiStatus, aiBusy, usedNano = aiCommand != null, note = aiNote, onAsk = askNano, onDownload = {
+                    aiStatus = OnDeviceAi.Status.DOWNLOADING
+                    scope.launch { ai.download(); aiStatus = ai.status() }
+                })
                 if (plan is VoiceAssistant.Plan.Add) plan.lines.forEach { line -> VoiceLine(line, retailerNames) }
             }
         },
@@ -98,5 +137,25 @@ private fun VoiceLine(line: VoiceAssistant.Line, retailerNames: Map<String, Stri
         }
         Text(detail, style = MaterialTheme.typography.bodySmall,
             color = if (offer != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun NanoRow(status: OnDeviceAi.Status, busy: Boolean, usedNano: Boolean, note: String?, onAsk: () -> Unit, onDownload: () -> Unit) {
+    val hint = MaterialTheme.typography.bodySmall
+    when {
+        busy -> Text("✨ Gemini Nano denkt …", style = hint, modifier = Modifier.testTag("voice-nano-busy"))
+        status == OnDeviceAi.Status.AVAILABLE -> Column {
+            if (usedNano) Text("✨ Von Gemini Nano auf dem Gerät verstanden", style = hint, color = MaterialTheme.colorScheme.primary)
+            note?.let { Text(it, style = hint) }
+            TextButton(onClick = onAsk, modifier = Modifier.testTag("voice-nano")) {
+                Text(if (usedNano) "✨ Erneut fragen" else "✨ Gemini Nano fragen")
+            }
+        }
+        status == OnDeviceAi.Status.DOWNLOADABLE -> TextButton(onClick = onDownload, modifier = Modifier.testTag("voice-nano-download")) {
+            Text("✨ Gemini Nano laden (einmalig, über WLAN empfohlen)")
+        }
+        status == OnDeviceAi.Status.DOWNLOADING -> Text("✨ Gemini Nano wird auf das Gerät geladen …", style = hint)
+        else -> Unit
     }
 }
