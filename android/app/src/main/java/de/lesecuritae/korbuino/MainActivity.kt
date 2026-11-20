@@ -544,29 +544,58 @@ private fun OfferOverview(
         LoyaltyBenefits.forOffer(display.offer).map { it.programId to it.displayLabel }
     }.distinctBy { it.first }.sortedBy { it.second }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    // Korbunio Plus voice assistant: the phone's speech recognition (offline where the device offers it),
-    // then the rule-based ShoppingCommand and a confirmation dialog. Without a recogniser the dialog opens for typing.
+    // Korbunio Plus voice assistant: the app listens itself and keeps listening across pauses until "Fertig"
+    // (ContinuousSpeech); then the rule-based ShoppingCommand / Gemini Nano and a confirmation dialog.
+    // Without the microphone permission the system speech dialog is used, without any recogniser the dialog opens for typing.
     var voiceText by remember { mutableStateOf<String?>(null) }
-    val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    var voicePartial by remember { mutableStateOf("") }
+    var voiceListening by remember { mutableStateOf(false) }
+    var voiceNote by remember { mutableStateOf<String?>(null) }
+    val activityContext = androidx.compose.ui.platform.LocalContext.current
+    val appContext = activityContext.applicationContext
     val onDeviceAi = remember { OnDeviceAiProvider.create(appContext) }
-    val speech = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val heard = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-        if (result.resultCode == android.app.Activity.RESULT_OK && !heard.isNullOrBlank()) voiceText = heard
+    val dictation = remember {
+        ContinuousSpeech(appContext,
+            onText = { text, partial -> voiceText = text; voicePartial = partial },
+            onEnd = { error -> voiceListening = false; voicePartial = ""; voiceNote = error })
     }
-    val listen: () -> Unit = {
+    androidx.compose.runtime.DisposableEffect(dictation) { onDispose { dictation.destroy() } }
+    val systemSpeech = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val heard = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (result.resultCode == android.app.Activity.RESULT_OK && !heard.isNullOrBlank()) voiceText = SpeechText.append(voiceText.orEmpty(), heard)
+        else if (voiceText == null) voiceText = ""
+    }
+    val listenWithSystemDialog: () -> Unit = {
         val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "de-DE")
             .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Was soll auf die Einkaufsliste?")
             .putExtra(android.speech.RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-        try { voiceText = null; speech.launch(intent) } catch (e: android.content.ActivityNotFoundException) { voiceText = "" }
+            .putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
+        try { systemSpeech.launch(intent) } catch (e: android.content.ActivityNotFoundException) { if (voiceText == null) voiceText = "" }
     }
+    val dictate: (String) -> Unit = { prefix ->
+        voiceNote = null
+        if (dictation.available) { voiceText = prefix; voiceListening = true; dictation.start(prefix) }
+        else { voiceText = prefix; listenWithSystemDialog() }
+    }
+    var pendingPrefix by remember { mutableStateOf("") }
+    val micPermission = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) dictate(pendingPrefix) else { voiceText = pendingPrefix; listenWithSystemDialog() }
+    }
+    val listenFrom: (String) -> Unit = { prefix ->
+        val granted = ContextCompat.checkSelfPermission(activityContext, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        if (granted) dictate(prefix) else { pendingPrefix = prefix; micPermission.launch(Manifest.permission.RECORD_AUDIO) }
+    }
+    val listen: () -> Unit = { listenFrom("") }
     voiceText?.let { heard ->
         VoiceAssistantDialog(
             initialText = heard, offers = shownOffers, shoppingItems = state.shoppingItems,
             loyaltyPrograms = state.selectedLoyaltyPrograms, retailerNames = retailerNames, today = today,
-            onListenAgain = listen, onDismiss = { voiceText = null }, ai = onDeviceAi,
+            onListenAgain = listenFrom, onDismiss = { dictation.stop(); voiceText = null }, ai = onDeviceAi,
+            listening = voiceListening, partial = voicePartial, note = voiceNote, onStopListening = { dictation.stop() },
             onConfirm = { plan ->
+                dictation.stop()
                 voiceText = null
                 when (plan) {
                     is VoiceAssistant.Plan.Add -> { viewModel.addVoiceLines(plan.lines); selectedTab = 1 }

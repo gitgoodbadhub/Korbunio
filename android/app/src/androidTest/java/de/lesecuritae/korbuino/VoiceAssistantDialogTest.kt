@@ -49,4 +49,21 @@ class VoiceAssistantDialogTest {
         compose.onNodeWithTag("voice-text").performTextReplacement("Wo gibt es Klopapier")
         compose.onNodeWithTag("voice-confirm").assertIsEnabled()
     }
+
+    @Test fun listeningShowsLiveTextAndFertigStopsIt() {
+        var stopped = false
+        var continuedWith: String? = null
+        compose.setContent {
+            MaterialTheme {
+                VoiceAssistantDialog("Klopapier", offers, emptyList(), emptySet(), emptyMap(), "2026-11-20",
+                    onListenAgain = { continuedWith = it }, onDismiss = {}, onConfirm = {},
+                    listening = true, partial = "zwei Flaschen", onStopListening = { stopped = true })
+            }
+        }
+        compose.onNodeWithTag("voice-partial").assert(hasText("zwei Flaschen", substring = true))
+        compose.onAllNodesWithTag("voice-confirm").assertCountEquals(0)
+        compose.onNodeWithTag("voice-stop").performClick()
+        compose.runOnIdle { assertEquals(true, stopped); assertEquals(null, continuedWith) }
+    }
 }
+
