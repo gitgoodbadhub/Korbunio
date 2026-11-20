@@ -10,9 +10,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VoiceAssistantTest {
-    private fun offer(id: String, retailer: String, name: String, cents: Int, brand: String = "", until: String? = null) = OfferDisplay(
+    private fun offer(id: String, retailer: String, name: String, cents: Int, brand: String = "", until: String? = null, from: String? = null) = OfferDisplay(
         OfferEntity(id = id, retailerId = retailer, productId = "p-$id", externalId = id, priceCents = cents,
-            sourceUrl = "https://example.invalid/$id", cachedAt = 0L, validUntil = until),
+            sourceUrl = "https://example.invalid/$id", cachedAt = 0L, validUntil = until, validFrom = from),
         productName = name, brand = brand,
     )
 
@@ -221,6 +221,22 @@ class VoiceAssistantTest {
         assertTrue(ProductVariants.isOnlyVariant("wasser", "feinperlig"))
         assertFalse(ProductVariants.isOnlyVariant("wasser", "Butter"))
         assertEquals("wasser", ProductVariants.strip("wasser", "stilles Wasser"))
+    }
+
+    @Test fun `words written apart find the compound and the cheaper leaflet offer wins`() {
+        val meat = listOf(
+            offer("t1", "edeka", "Gut & Günstig Puten-Schnitzel", 509),
+            offer("t2", "aldi-sued", "Putenschnitzel", 499, from = "2026-11-23", until = "2026-11-28"),
+            offer("t3", "rewe", "Putenschnitzel natur", 699, from = "2026-12-10"),
+            offer("t4", "rewe", "Schweineschnitzel", 399),
+        )
+        for (said in listOf("Puten Schnitzel", "Putenschnitzel")) {
+            val line = (VoiceAssistant.plan(ShoppingCommand.parse("Ich brauche $said"), meat, emptyList(), emptySet(), today) as Plan.Add).lines.single()
+            assertEquals(said, "t2", line.offer?.offer?.id)
+            assertEquals(said, listOf("t2", "t1"), line.options.map { it.offer.offer.id })
+        }
+        assertEquals("ab 23.11.", VoiceAssistant.startsLater(meat[1], today))
+        assertNull(VoiceAssistant.startsLater(meat[0], today))
     }
 }
 

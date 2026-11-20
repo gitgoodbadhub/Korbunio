@@ -69,8 +69,7 @@ object VoiceAssistant {
         variantPicks: Map<Int, String?> = emptyMap(),
     ): Plan = when (command) {
         is ShoppingCommand.Command.Add -> {
-            val current = if (today == null) offers
-            else offers.filter { OfferMatcher.isShown(it.offer.validFrom, it.offer.validUntil, today, false) }
+            val current = if (today == null) offers else offers.filter { isCurrentOrSoon(it, today) }
             val index = current.map { it to OfferSearch.index(it) }
             val items = withVariantAnswers(command.items)
             Plan.Add(items.mapIndexed { i, item ->
@@ -94,6 +93,26 @@ object VoiceAssistant {
         OfferPricing.quote(display.offer, 1, loyaltyPrograms).totalCents
 
     private data class Pick(val variantId: String?)
+
+    /** Days ahead from which offers count: paper leaflets often show next week's offers already. */
+    const val DAYS_AHEAD = 7L
+
+    fun isCurrentOrSoon(display: OfferDisplay, today: String): Boolean {
+        val offer = display.offer
+        if (OfferMatcher.isShown(offer.validFrom, offer.validUntil, today, false)) return true
+        if (!OfferMatcher.isShown(offer.validFrom, offer.validUntil, today, true)) return false
+        val from = BerlinDate.toLocalDate(offer.validFrom) ?: return false
+        val limit = runCatching { java.time.LocalDate.parse(today).plusDays(DAYS_AHEAD).toString() }.getOrNull() ?: return false
+        return from <= limit
+    }
+
+    /** "ab 23.11." for an offer that starts after [today], else null. */
+    fun startsLater(display: OfferDisplay, today: String): String? {
+        if (today.isBlank()) return null
+        val from = BerlinDate.toLocalDate(display.offer.validFrom) ?: return null
+        if (from <= today) return null
+        return "ab ${from.substring(8, 10)}.${from.substring(5, 7)}."
+    }
 
     /** "Wasser, feinperlig": a piece that only names a sort belongs to the product before it. */
     fun withVariantAnswers(items: List<ShoppingCommand.Item>): List<ShoppingCommand.Item> {
@@ -120,8 +139,8 @@ object VoiceAssistant {
         val key = ProductVariants.key(item.name)
         val spoken = ProductVariants.detect(key, item.name)
         val baseName = ProductVariants.strip(key, item.name).ifBlank { key ?: item.name }
-        val query = OfferSearch.prepare(baseName)
-        val general = query.terms.size == 1 && query.quantities.isEmpty()
+        val queries = OfferSearch.prepareAll(baseName)
+        val general = queries.any { it.terms.size == 1 && it.quantities.isEmpty() }
         val memoryKey = if (general) key ?: OfferSearch.normalize(baseName) else null
         val remembered = memoryKey?.let { memory[it] }
         val (variant, source) = when {
@@ -131,7 +150,7 @@ object VoiceAssistant {
                 ProductVariants.byId(key, remembered.variant) to VariantSource.REMEMBERED
             else -> null to VariantSource.NONE
         }
-        val base = match(item, query, index, loyalty)
+        val base = match(item, queries, index, loyalty)
             .copy(variants = ProductVariants.variants(key), variant = variant, variantSource = source, memoryKey = memoryKey)
         val all = base.options
         if (all.isEmpty()) return base
@@ -168,14 +187,14 @@ object VoiceAssistant {
         key to VoiceMemory.Entry(sort?.id, offer.productName)
     }.toMap()
 
-    private fun match(item: ShoppingCommand.Item, query: OfferSearch.Query, index: List<Pair<OfferDisplay, OfferSearch.Indexed>>, loyalty: Set<String>): Line {
+    private fun match(item: ShoppingCommand.Item, queries: List<OfferSearch.Query>, index: List<Pair<OfferDisplay, OfferSearch.Indexed>>, loyalty: Set<String>): Line {
         val scored = index.mapNotNull { (display, indexed) ->
-            OfferSearch.score(query, indexed).takeIf { it > 0 }?.let { Triple(display, indexed, it) }
+            OfferSearch.score(queries, indexed).takeIf { it > 0 }?.let { Triple(display, indexed, it) }
         }
         if (scored.isEmpty()) return Line(item, null, null)
         // The product itself ("Vollmilch", "Mineralwasser") before things that only contain the word
         // ("Müllermilch", "Schnupfenspray Meerwasser").
-        val same = scored.filter { OfferSearch.isSameProduct(query, it.second) }
+        val same = scored.filter { candidate -> queries.any { OfferSearch.isSameProduct(it, candidate.second) } }
         val uncertain = same.isEmpty()
         val pool = (if (uncertain) scored.filter { it.third >= MIN_PICK_SCORE } else same)
         if (pool.isEmpty()) return Line(item, null, null)
@@ -192,7 +211,7 @@ object VoiceAssistant {
         val options = ordered.distinctBy { it.first.productName.lowercase() to it.first.offer.retailerId }
             .map { Option(it.first, it.third) }
         // Exact wishes (brand, size, several words) get the best match; general words the cheapest real one.
-        val general = query.terms.size == 1 && query.quantities.isEmpty()
+        val general = queries.any { it.terms.size == 1 && it.quantities.isEmpty() }
         val pick = when {
             uncertain -> null
             general -> ordered.first()

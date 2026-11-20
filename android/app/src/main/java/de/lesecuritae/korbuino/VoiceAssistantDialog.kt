@@ -131,7 +131,7 @@ internal fun VoiceAssistantDialog(
                     scope.launch { ai.download(); aiStatus = ai.status() }
                 })
                 if (plan is VoiceAssistant.Plan.Add) plan.lines.forEachIndexed { index, line ->
-                    VoiceLine(line, retailerNames, onPick = { picks[index] = it },
+                    VoiceLine(line, retailerNames, today = today, onPick = { picks[index] = it },
                         onVariant = { variantPicks[index] = it }, onForget = { key -> onForget(key); variantPicks[index] = null })
                 }
             }
@@ -156,6 +156,7 @@ internal fun VoiceAssistantDialog(
 private fun VoiceLine(
     line: VoiceAssistant.Line,
     retailerNames: Map<String, String>,
+    today: String = "",
     onPick: (OfferDisplay?) -> Unit,
     onVariant: (String?) -> Unit = {},
     onForget: (String) -> Unit = {},
@@ -201,14 +202,16 @@ private fun VoiceLine(
             line.options.forEach { option ->
                 ChoiceRow(selected = offer?.offer?.id == option.offer.offer.id, tag = "voice-option",
                     text = "${option.offer.productName} · ${retailerNames[option.offer.offer.retailerId] ?: option.offer.offer.retailerId}" +
-                        " · ${OfferMatcher.formatPrice(option.unitCents)}",
+                        " · ${OfferMatcher.formatPrice(option.unitCents)}" +
+                        (VoiceAssistant.startsLater(option.offer, today)?.let { " · $it" } ?: ""),
                     onClick = { onPick(option.offer) })
             }
             ChoiceRow(selected = offer == null, tag = "voice-option-note", text = "Ohne Angebot, nur auf die Liste", onClick = { onPick(null) })
         } else {
             val detail = when {
                 offer != null -> "${offer.productName} · ${retailerNames[offer.offer.retailerId] ?: offer.offer.retailerId}" +
-                    (line.unitCents?.let { " · ${OfferMatcher.formatPrice(it)}" } ?: "")
+                    (line.unitCents?.let { " · ${OfferMatcher.formatPrice(it)}" } ?: "") +
+                    (VoiceAssistant.startsLater(offer, today)?.let { " · $it" } ?: "")
                 line.overLimitOnly -> "Nur teurere Angebote – kommt als Notiz auf die Liste"
                 else -> "Kein Angebot – kommt als Notiz auf die Liste"
             }

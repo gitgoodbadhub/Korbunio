@@ -83,4 +83,13 @@ class OfferSearchTest {
         assertEquals(1, OfferSearch.distance("joghrt", "joghurt", 2))
         assertEquals(3, OfferSearch.distance("abc", "xyzabc", 2))
     }
+
+    @Test fun `compound words match when written apart and the other way round`() {
+        fun score(query: String, name: String) = OfferSearch.score(OfferSearch.prepareAll(query), OfferSearch.index(name, "", "", null))
+        assertTrue(score("Puten Schnitzel", "Putenschnitzel") >= score("Puten Schnitzel", "Puten-Schnitzel"))
+        assertTrue(score("Putenschnitzel", "Puten Schnitzel") > 0)
+        assertEquals(score("Putenschnitzel", "Putenschnitzel"), score("Puten Schnitzel", "Putenschnitzel"))
+        assertEquals(0, score("Puten Schnitzel", "Schweineschnitzel"))
+    }
 }
+

@@ -497,7 +497,7 @@ private fun OfferOverview(
     }
     // Korbunio Plus: ranked search (synonyms, stems, typos, sizes); the index is built once per loaded list.
     val searchIndex = remember(shownOffers) { shownOffers.associate { it.offer.id to OfferSearch.index(it) } }
-    val searchQuery = remember(offerFilter) { OfferSearch.prepare(offerFilter) }
+    val searchQuery = remember(offerFilter) { OfferSearch.prepareAll(offerFilter) }
     val searchScores = remember(searchIndex, searchQuery) {
         if (offerFilter.isBlank()) emptyMap()
         else searchIndex.mapValues { (_, indexed) -> OfferSearch.score(searchQuery, indexed) }.filterValues { it > 0 }
