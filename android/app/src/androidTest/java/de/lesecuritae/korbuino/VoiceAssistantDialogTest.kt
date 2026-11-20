@@ -65,5 +65,29 @@ class VoiceAssistantDialogTest {
         compose.onNodeWithTag("voice-stop").performClick()
         compose.runOnIdle { assertEquals(true, stopped); assertEquals(null, continuedWith) }
     }
+
+    @Test fun generalWordOffersAChoiceAndThePickIsUsed() {
+        fun water(id: String, name: String, cents: Int, retailer: String) = OfferDisplay(
+            OfferEntity(id = id, retailerId = retailer, productId = "p$id", externalId = id, priceCents = cents,
+                sourceUrl = "https://example.invalid/$id", cachedAt = 0L),
+            productName = name,
+        )
+        val waters = listOf(water("a", "Saskia Mineralwasser", 19, "marktguru-lidl"), water("b", "Vöslauer Mineralwasser", 79, "rewe"),
+            water("c", "Curafit Schnupfenspray Meerwasser", 179, "dm"))
+        var confirmed: VoiceAssistant.Plan? = null
+        compose.setContent {
+            MaterialTheme {
+                VoiceAssistantDialog("Ich brauche Wasser", waters, emptyList(), emptySet(), mapOf("rewe" to "REWE"), "2026-11-20",
+                    onListenAgain = {}, onDismiss = {}, onConfirm = { confirmed = it })
+            }
+        }
+        compose.onAllNodesWithTag("voice-option").assertCountEquals(2)
+        compose.onAllNodesWithText("Meerwasser", substring = true).assertCountEquals(0)
+        compose.onNodeWithText("Vöslauer Mineralwasser", substring = true).performClick()
+        compose.onNodeWithTag("voice-confirm").performClick()
+        compose.runOnIdle {
+            assertEquals("b", (confirmed as VoiceAssistant.Plan.Add).lines.single().offer?.offer?.id)
+        }
+    }
 }
 
