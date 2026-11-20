@@ -19,6 +19,31 @@ class ProviderRegistry(private val providers: List<RetailerProvider>) {
                 KaufdaRetailerProvider(id, name, name, name, http),
             )
 
+        /**
+         * Leaflet portals (kaufDA, then Marktguru) as a stand-in for a retailer's own source. They are asked
+         * only when the own source has nothing for the requested week, e.g. next week's paper leaflet that
+         * the retailer's website does not show yet, so no offer appears twice.
+         */
+        internal fun withLeaflet(
+            primary: RetailerProvider,
+            kaufdaPublisher: String,
+            kaufdaSlug: String,
+            marktguruName: String,
+            http: okhttp3.OkHttpClient,
+            fallbackOnFailure: Boolean = true,
+        ): RetailerProvider = FallbackRetailerProvider(
+            primary,
+            FallbackRetailerProvider(
+                KaufdaRetailerProvider(primary.id, primary.displayName, kaufdaPublisher, kaufdaSlug, http, regionalViewer = true),
+                MarktguruProvider(marktguruName, http, providerId = primary.id, providerDisplayName = primary.displayName),
+            ),
+            fallbackOnFailure = fallbackOnFailure,
+        )
+
+        /** For retailers read from Marktguru only: kaufDA steps in when Marktguru has nothing for the week. */
+        internal fun withKaufda(primary: RetailerProvider, kaufdaPublisher: String, kaufdaSlug: String, http: okhttp3.OkHttpClient): RetailerProvider =
+            FallbackRetailerProvider(primary, KaufdaRetailerProvider(primary.id, primary.displayName, kaufdaPublisher, kaufdaSlug, http, regionalViewer = true))
+
         fun default(http: okhttp3.OkHttpClient): ProviderRegistry {
             val aldiMarkets = AldiMarkets(http)
             return ProviderRegistry(
@@ -29,12 +54,13 @@ class ProviderRegistry(private val providers: List<RetailerProvider>) {
                     AldiNordProvider(http),
                     KaufdaRetailerProvider("aldi-nord", "ALDI Nord", "ALDI Nord", "Aldi-Nord", http, regionalViewer = true),
                 )) { aldiMarkets.hasMarket(it, "nord") },
-                MarketGateProvider(HtmlFlyerProvider(
+                MarketGateProvider(withLeaflet(HtmlFlyerProvider(
                     "aldi-sued", "ALDI Süd", "https://www.aldi-sued.de/angebote", http,
                     renderedHtmlProvider = { RenderedPageStore.consume("https://www.aldi-sued.de/angebote") },
-                )) { aldiMarkets.hasMarket(it, "sued") },
-                // Regional store identity must survive both failures and empty future weeks.
-                KauflandProvider(http),
+                ), "ALDI SÜD", "Aldi-Sued", "ALDI SÜD", http)) { aldiMarkets.hasMarket(it, "sued") },
+                // Regional store identity must survive both failures and empty future weeks; the leaflet
+                // portals only step in when Kaufland's own source has nothing for the week.
+                withLeaflet(KauflandProvider(http), "Kaufland", "Kaufland", "Kaufland", http, fallbackOnFailure = false),
                 FallbackRetailerProvider(
                     HtmlFlyerProvider(
                         "rossmann", "Rossmann", "https://www.rossmann.de/de/angebote/m/angebote/", http,
@@ -71,21 +97,21 @@ class ProviderRegistry(private val providers: List<RetailerProvider>) {
                     HtmlFlyerProvider("netto-schwarz", "Netto schwarz", "https://netto.de/angebote/", http),
                     MarktguruProvider("Netto mit dem Scottie", http),
                 ), hasMarket = NettoScottieMarkets(http)::hasMarket),
-                MarktguruProvider(
+                withKaufda(MarktguruProvider(
                     "Netto Marken-Discount",
                     http,
                     providerId = "netto-marken",
                     providerDisplayName = "Netto Marken-Discount",
-                ),
+                ), "Netto Marken-Discount", "Netto-Marken-Discount", http),
                 DmProvider(http),
-                MarktguruProvider("famila Nordwest", http),
-                MarktguruProvider("Combi", http),
+                withKaufda(MarktguruProvider("famila Nordwest", http), "famila", "Famila", http),
+                withKaufda(MarktguruProvider("Combi", http), "Combi", "Combi", http),
                 MarketGateProvider(AktivIrmaProvider(http), hasMarket = AktivIrmaMarkets(http)::hasMarket),
                 SupplementingRetailerProvider(
                     MarktguruProvider("Lidl", http),
                     KaufdaRetailerProvider("marktguru-lidl", "Lidl", "Lidl", "Lidl", http, regionalViewer = true),
                 ),
-                MarktguruProvider("PENNY", http),
+                withKaufda(MarktguruProvider("PENNY", http), "PENNY", "Penny-Markt", http),
                 catalogueOnly("action", "Action", http),
                 catalogueOnly("kodi", "KODi", http),
                 catalogueOnly("kik", "KiK", http),
