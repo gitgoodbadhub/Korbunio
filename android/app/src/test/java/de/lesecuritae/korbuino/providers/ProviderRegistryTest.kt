@@ -39,12 +39,11 @@ class ProviderRegistryTest {
 
     @Test fun `own-source retailers fall back to the leaflet portals for weeks their source does not show`() {
         val registry = ProviderRegistry.default(OkHttpClient())
-        listOf("kaufland", "marktguru-penny", "netto-marken", "marktguru-famila-nordwest", "marktguru-combi").forEach { id ->
+        listOf("marktguru-penny", "netto-marken", "marktguru-famila-nordwest", "marktguru-combi").forEach { id ->
             assertTrue("$id needs a leaflet fallback", registry.byId(id) is FallbackRetailerProvider)
         }
         // ALDI Süd keeps its regional market gate around the leaflet fallback.
         assertTrue(registry.byId("aldi-sued") is MarketGateProvider)
-        assertTrue(registry.all().first { it.id == "kaufland" }.displayName == "Kaufland")
     }
 }
 

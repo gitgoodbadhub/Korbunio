@@ -58,9 +58,9 @@ class ProviderRegistry(private val providers: List<RetailerProvider>) {
                     "aldi-sued", "ALDI Süd", "https://www.aldi-sued.de/angebote", http,
                     renderedHtmlProvider = { RenderedPageStore.consume("https://www.aldi-sued.de/angebote") },
                 ), "ALDI SÜD", "Aldi-Sued", "ALDI SÜD", http)) { aldiMarkets.hasMarket(it, "sued") },
-                // Regional store identity must survive both failures and empty future weeks; the leaflet
-                // portals only step in when Kaufland's own source has nothing for the week.
-                withLeaflet(KauflandProvider(http), "Kaufland", "Kaufland", "Kaufland", http, fallbackOnFailure = false),
+                // Regional store identity must survive both failures and empty future weeks: Kaufland's own
+                // source reads the chosen store, so an empty week is authoritative and no leaflet portal steps in.
+                KauflandProvider(http),
                 FallbackRetailerProvider(
                     HtmlFlyerProvider(
                         "rossmann", "Rossmann", "https://www.rossmann.de/de/angebote/m/angebote/", http,
