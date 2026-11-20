@@ -41,6 +41,7 @@ internal fun StoreRouteCard(route: StoreRouteUi, retailerNames: Map<String, Stri
                 }
                 route.error != null -> {
                     Text(route.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("route-error"))
+                    TextRouteButton(route.retailerIds, retailerNames, postalCode, ::open)
                     MapSearchRows(route.retailerIds, retailerNames, postalCode, ::open)
                 }
                 else -> {
@@ -93,4 +94,15 @@ private fun MapSearchRows(retailerIds: List<String>, retailerNames: Map<String, 
             TextButton(onClick = { open(StoreRoute.geoSearchUri(shop)) }) { Text("Karten-App") }
         }
     }
+}
+
+/** Without coordinates: one Google Maps route through all shops by name (Google picks the branches, order not optimised). */
+@Composable
+private fun TextRouteButton(retailerIds: List<String>, retailerNames: Map<String, String>, postalCode: String, open: (String?) -> Unit) {
+    if (retailerIds.distinct().size < 2) return
+    val names = retailerIds.distinct().map { StoreRoute.searchName(it, retailerNames[it] ?: it) }
+    Button(onClick = { open(StoreRoute.googleMapsTextRouteUrl(names, postalCode)) }, modifier = Modifier.testTag("route-text-route")) {
+        Text("Alle Märkte als eine Route in Google Maps")
+    }
+    Text("Google wählt die Filialen selbst; die Reihenfolge ist dabei nicht optimiert.", style = MaterialTheme.typography.bodySmall)
 }

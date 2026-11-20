@@ -173,13 +173,56 @@ object StoreRoute {
     }
 
     /** "Straße Nr, PLZ Ort" from a Nominatim reverse answer, or "" when it has no usable street. */
-    fun addressFromNominatim(json: String): String {
-        val address = runCatching { Json.parseToJsonElement(json).jsonObject["address"]?.jsonObject }.getOrNull() ?: return ""
+    fun addressFromNominatim(json: String): String =
+        addressOf(runCatching { Json.parseToJsonElement(json).jsonObject["address"]?.jsonObject }.getOrNull())
+
+    private fun addressOf(address: JsonObject?): String {
+        if (address == null) return ""
         val road = address.text("road") ?: address.text("pedestrian") ?: address.text("square") ?: return ""
         val street = listOfNotNull(road, address.text("house_number")).joinToString(" ")
         val town = address.text("city") ?: address.text("town") ?: address.text("village") ?: address.text("municipality")
         val place = listOfNotNull(address.text("postcode"), town).joinToString(" ")
         return listOf(street, place).filter { it.isNotBlank() }.joinToString(", ")
+    }
+
+    /** Search box for a Nominatim shop search of about [radiusM] around the point (left,top,right,bottom). */
+    fun viewbox(lat: Double, lon: Double, radiusM: Int = DEFAULT_RADIUS_M): String {
+        val dLat = radiusM / 111_320.0
+        val dLon = radiusM / (111_320.0 * kotlin.math.cos(Math.toRadians(lat)).coerceAtLeast(0.1))
+        return listOf(lon - dLon, lat + dLat, lon + dLon, lat - dLat).joinToString(",") { coord(it) }
+    }
+
+    /**
+     * Nearest matching shop of one retailer from a Nominatim search answer (fallback when Overpass is overloaded).
+     * Nominatim has no brand tag in its default answer, so the name and the shop type have to match.
+     */
+    fun nearestFromNominatim(json: String, retailerId: String, lat: Double, lon: Double): StoreStop? {
+        val rule = brands[retailerId] ?: return null
+        val regex = Regex(rule.pattern, RegexOption.IGNORE_CASE)
+        val rows = runCatching { Json.parseToJsonElement(json).jsonArray }.getOrNull() ?: return null
+        return rows.mapNotNull { raw ->
+            val row = raw as? JsonObject ?: return@mapNotNull null
+            val category = row.text("category") ?: row.text("class")
+            val type = row.text("type") ?: return@mapNotNull null
+            val name = row.text("name") ?: return@mapNotNull null
+            if (category != "shop" || type !in rule.shopTypes || !regex.containsMatchIn(name)) return@mapNotNull null
+            val sLat = row.text("lat")?.toDoubleOrNull() ?: return@mapNotNull null
+            val sLon = row.text("lon")?.toDoubleOrNull() ?: return@mapNotNull null
+            if (sLat !in -90.0..90.0 || sLon !in -180.0..180.0) return@mapNotNull null
+            StoreStop(retailerId, name, addressOf(row["address"] as? JsonObject), sLat, sLon, distanceKm(lat, lon, sLat, sLon))
+        }.minByOrNull { it.distanceKm }
+    }
+
+    /**
+     * Last resort without coordinates: one Google Maps route through all shops by name and postal code.
+     * Google resolves each name itself; the order cannot be optimised without coordinates.
+     */
+    fun googleMapsTextRouteUrl(shopNames: List<String>, postalCode: String = ""): String? {
+        val stops = shopNames.distinct().take(MAX_STOPS).map { "$it $postalCode".trim() }
+        if (stops.isEmpty()) return null
+        val builder = StringBuilder("https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=").append(enc(stops.last()))
+        if (stops.size > 1) builder.append("&waypoints=").append(enc(stops.dropLast(1).joinToString("|")))
+        return builder.toString()
     }
 
     /** Stops as GeoJSON points for the in-app map; "n" is the visiting number shown in the marker. */
@@ -268,7 +311,18 @@ class StoreFinder(
             routes[key]?.takeIf { now() - it.first < cacheMillis }?.let { return@withContext it.second.copy(missingRetailerIds = it.second.missingRetailerIds + unknown) }
             val (lat, lon) = postalPoints[postalCode] ?: geocode(postalCode).also { postalPoints[postalCode] = it }
             val query = StoreRoute.overpassQuery(known, lat, lon, radiusM) ?: return@withContext StoreRouteResult(emptyList(), unknown)
-            val nearest = StoreRoute.nearestPerRetailer(overpass(query), known, lat, lon)
+            var overload: OverpassOverloadedException? = null
+            val nearest = try {
+                StoreRoute.nearestPerRetailer(overpass(query), known, lat, lon).toMutableMap()
+            } catch (busy: OverpassOverloadedException) {
+                overload = busy
+                mutableMapOf()
+            }
+            // Second source: Nominatim shop search for retailers Overpass could not deliver (overload or no match).
+            for (id in known.filterNot { it in nearest }.take(StoreRoute.MAX_STOPS)) {
+                nominatimShop(id, lat, lon, radiusM)?.let { nearest[id] = it }
+            }
+            if (nearest.isEmpty() && overload != null) throw overload
             val ordered = StoreRoute.order(nearest.values, lat, lon).map { stop ->
                 if (stop.address.isNotBlank()) stop else stop.copy(address = reverseAddress(stop.lat, stop.lon))
             }
@@ -293,7 +347,23 @@ class StoreFinder(
                 lastProblem = io.javaClass.simpleName
             }
         }
-        error("Die OpenStreetMap-Filialsuche ist gerade überlastet ($lastProblem). Bitte in ein paar Minuten erneut versuchen.")
+        throw OverpassOverloadedException("Die OpenStreetMap-Filialsuche ist gerade überlastet ($lastProblem). Bitte in ein paar Minuten erneut versuchen.")
+    }
+
+    /** Nearest shop of one retailer via the Nominatim search (one request per second); failures give null. */
+    private suspend fun nominatimShop(retailerId: String, lat: Double, lon: Double, radiusM: Int): StoreStop? {
+        kotlinx.coroutines.delay(nominatimPauseMillis)
+        return runCatching {
+            val url = nominatimUrl.toHttpUrl().newBuilder()
+                .addQueryParameter("q", StoreRoute.searchName(retailerId)).addQueryParameter("format", "jsonv2")
+                .addQueryParameter("limit", "20").addQueryParameter("addressdetails", "1")
+                .addQueryParameter("bounded", "1").addQueryParameter("viewbox", StoreRoute.viewbox(lat, lon, radiusM))
+                .addQueryParameter("countrycodes", "de").build()
+            http.newCall(Request.Builder().url(url).header("User-Agent", userAgent).build()).execute().use { response ->
+                if (!response.isSuccessful) null
+                else StoreRoute.nearestFromNominatim(response.body?.string().orEmpty(), retailerId, lat, lon)
+            }
+        }.getOrNull()
     }
 
     /** Street address for a shop without address tags; failures only leave the address empty. */
@@ -326,3 +396,6 @@ class StoreFinder(
         return lat to lon
     }
 }
+
+/** All public Overpass servers answered with overload or did not answer. */
+class OverpassOverloadedException(message: String) : IllegalStateException(message)
