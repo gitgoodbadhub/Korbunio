@@ -22,6 +22,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.Role
@@ -53,6 +56,9 @@ internal fun VoiceAssistantDialog(
     partial: String = "",
     note: String? = null,
     onStopListening: () -> Unit = {},
+    /** What the assistant learned earlier ("wasser" → medium) and how to forget one entry. */
+    memory: Map<String, VoiceMemory.Entry> = emptyMap(),
+    onForget: (String) -> Unit = {},
 ) {
     var text by remember(initialText) { mutableStateOf(initialText) }
     // Gemini Nano (where the phone has it): its reading replaces the rule-based one until the text is edited.
@@ -62,8 +68,11 @@ internal fun VoiceAssistantDialog(
     var aiNote by remember(initialText) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val ruleCommand = remember(text) { ShoppingCommand.parse(text) }
-    val proposed = remember(aiCommand, ruleCommand, offers, shoppingItems, loyaltyPrograms) {
-        VoiceAssistant.plan(aiCommand ?: ruleCommand, offers, shoppingItems, loyaltyPrograms, today)
+    // Sorts picked here ("still"); a null value means "any sort".
+    val variantPicks = remember(aiCommand, ruleCommand) { mutableStateMapOf<Int, String?>() }
+    val variantSnapshot = variantPicks.toMap()
+    val proposed = remember(aiCommand, ruleCommand, offers, shoppingItems, loyaltyPrograms, memory, variantSnapshot) {
+        VoiceAssistant.plan(aiCommand ?: ruleCommand, offers, shoppingItems, loyaltyPrograms, today, memory, variantSnapshot)
     }
     // The user's picks among the offered sorts ("Welches Wasser?"); null = only a note on the list.
     val picks = remember(proposed) { mutableStateMapOf<Int, OfferDisplay?>() }
@@ -122,7 +131,8 @@ internal fun VoiceAssistantDialog(
                     scope.launch { ai.download(); aiStatus = ai.status() }
                 })
                 if (plan is VoiceAssistant.Plan.Add) plan.lines.forEachIndexed { index, line ->
-                    VoiceLine(line, retailerNames, onPick = { picks[index] = it })
+                    VoiceLine(line, retailerNames, onPick = { picks[index] = it },
+                        onVariant = { variantPicks[index] = it }, onForget = { key -> onForget(key); variantPicks[index] = null })
                 }
             }
         },
@@ -142,13 +152,43 @@ internal fun VoiceAssistantDialog(
 }
 
 @Composable
-private fun VoiceLine(line: VoiceAssistant.Line, retailerNames: Map<String, String>, onPick: (OfferDisplay?) -> Unit) {
+@OptIn(ExperimentalLayoutApi::class)
+private fun VoiceLine(
+    line: VoiceAssistant.Line,
+    retailerNames: Map<String, String>,
+    onPick: (OfferDisplay?) -> Unit,
+    onVariant: (String?) -> Unit = {},
+    onForget: (String) -> Unit = {},
+) {
     val item = line.item
     val title = (if (item.quantity > 1) "${item.quantity}× " else "") + item.name.replaceFirstChar { it.titlecase() } +
         (item.maxPriceCents?.let { " (bis ${OfferMatcher.formatPrice(it)})" } ?: "")
     Column(modifier = Modifier.fillMaxWidth().testTag("voice-line")) {
         Text(title, style = MaterialTheme.typography.bodyLarge)
         val offer = line.offer
+        if (line.variants.isNotEmpty() && line.options.isNotEmpty()) {
+            val hint = MaterialTheme.typography.bodySmall
+            when {
+                line.variant == null -> Text("Welche Sorte? Tippen oder dazusagen (🎤 Weiter)", style = hint,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                line.variantMissing -> Text("„${line.variant?.label}“ ist gerade nicht im Angebot – andere Sorten:", style = hint,
+                    color = MaterialTheme.colorScheme.error)
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                line.variants.forEach { variant ->
+                    val selected = line.variant?.id == variant.id
+                    FilterChip(
+                        selected = selected,
+                        onClick = { onVariant(if (selected) null else variant.id) },
+                        label = { Text(variant.label + if (selected && line.variantSource == VoiceAssistant.VariantSource.REMEMBERED) " · gemerkt" else "") },
+                        modifier = Modifier.testTag("voice-variant-${variant.id}"),
+                    )
+                }
+            }
+            if (line.variantSource == VoiceAssistant.VariantSource.REMEMBERED || line.rememberedProduct) line.memoryKey?.let { key ->
+                TextButton(onClick = { onForget(key) }, modifier = Modifier.testTag("voice-forget")) { Text("Gemerktes vergessen", style = hint) }
+            }
+        }
         if (line.needsChoice) {
             Text(
                 when {

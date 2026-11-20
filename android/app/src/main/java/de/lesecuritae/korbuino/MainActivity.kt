@@ -554,6 +554,9 @@ private fun OfferOverview(
     val activityContext = androidx.compose.ui.platform.LocalContext.current
     val appContext = activityContext.applicationContext
     val onDeviceAi = remember { OnDeviceAiProvider.create(appContext) }
+    // What the assistant learned from earlier choices ("wasser" → medium); kept only on this phone.
+    val voicePrefs = remember { VoicePreferences(appContext) }
+    var voiceMemory by remember { mutableStateOf(voicePrefs.load()) }
     val dictation = remember {
         ContinuousSpeech(appContext,
             onText = { text, partial -> voiceText = text; voicePartial = partial },
@@ -594,11 +597,15 @@ private fun OfferOverview(
             loyaltyPrograms = state.selectedLoyaltyPrograms, retailerNames = retailerNames, today = today,
             onListenAgain = listenFrom, onDismiss = { dictation.stop(); voiceText = null }, ai = onDeviceAi,
             listening = voiceListening, partial = voicePartial, note = voiceNote, onStopListening = { dictation.stop() },
+            memory = voiceMemory, onForget = { key -> voiceMemory = voiceMemory - key; voicePrefs.save(voiceMemory) },
             onConfirm = { plan ->
                 dictation.stop()
                 voiceText = null
                 when (plan) {
-                    is VoiceAssistant.Plan.Add -> { viewModel.addVoiceLines(plan.lines); selectedTab = 1 }
+                    is VoiceAssistant.Plan.Add -> {
+                        viewModel.addVoiceLines(plan.lines); selectedTab = 1
+                        voiceMemory = VoiceMemory.merge(voiceMemory, VoiceAssistant.learn(plan)); voicePrefs.save(voiceMemory)
+                    }
                     is VoiceAssistant.Plan.Search -> { offerFilter = plan.query.take(80); selectedTab = 0 }
                     is VoiceAssistant.Plan.Remove -> { viewModel.removeShoppingItems(plan.rows); selectedTab = 1 }
                     VoiceAssistant.Plan.ShowList -> selectedTab = 1

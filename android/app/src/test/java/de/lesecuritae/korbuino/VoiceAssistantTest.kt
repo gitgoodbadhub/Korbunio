@@ -151,5 +151,76 @@ class VoiceAssistantTest {
         assertFalse(OfferSearch.isKind("wasser", "meerwasser"))
         assertFalse(OfferSearch.isKind("milch", "buttermilch"))
     }
+
+    private val waters = listOf(
+        offer("s1", "marktguru-lidl", "Saskia Mineralwasser still", 19),
+        offer("s2", "rewe", "Gerolsteiner Mineralwasser Medium", 69),
+        offer("s3", "edeka", "Vöslauer Mineralwasser", 79),
+        offer("s4", "kaufland", "Tafelwasser spritzig", 25),
+    )
+
+    private fun waterPlan(text: String, memory: Map<String, VoiceMemory.Entry> = emptyMap(), picks: Map<Int, String?> = emptyMap()) =
+        VoiceAssistant.plan(ShoppingCommand.parse(text), waters, emptyList(), emptySet(), today, memory, picks) as Plan.Add
+
+    @Test fun `a spoken sort narrows the choice`() {
+        val line = waterPlan("Ich brauche stilles Wasser").lines.single()
+        assertEquals("still", line.variant?.id)
+        assertEquals(VoiceAssistant.VariantSource.SPOKEN, line.variant?.let { line.variantSource })
+        assertEquals(listOf("s1"), line.options.map { it.offer.offer.id })
+        assertEquals("s1", line.offer?.offer?.id)
+    }
+
+    @Test fun `an answer after a pause belongs to the product before`() {
+        val plan = waterPlan("Ich brauche Wasser, feinperlig, und Milch")
+        assertEquals(2, plan.lines.size)
+        assertEquals("medium", plan.lines[0].variant?.id)
+        assertEquals("s2", plan.lines[0].offer?.offer?.id)
+        assertEquals("classic", waterPlan("Füge Sprudel hinzu").lines.single().variant?.id)
+    }
+
+    @Test fun `without a sort the sorts are offered as a question`() {
+        val line = waterPlan("Ich brauche Wasser").lines.single()
+        assertNull(line.variant)
+        assertEquals(listOf("still", "medium", "classic"), line.variants.map { it.id })
+        assertEquals("s1", line.offer?.offer?.id)
+    }
+
+    @Test fun `remembered sort and product are used next time and a pick overrides them`() {
+        val memory = mapOf("wasser" to VoiceMemory.Entry("medium", "Gerolsteiner Mineralwasser Medium"))
+        val line = waterPlan("Ich brauche Wasser", memory).lines.single()
+        assertEquals(VoiceAssistant.VariantSource.REMEMBERED, line.variantSource)
+        assertEquals("s2", line.offer?.offer?.id)
+        assertTrue(line.rememberedProduct)
+        val picked = waterPlan("Ich brauche Wasser", memory, mapOf(0 to "still")).lines.single()
+        assertEquals("s1", picked.offer?.offer?.id)
+        assertEquals(VoiceAssistant.VariantSource.PICKED, picked.variantSource)
+    }
+
+    @Test fun `a missing sort shows the others`() {
+        val line = VoiceAssistant.plan(ShoppingCommand.parse("Ich brauche Wasser classic"), waters.take(3), emptyList(), emptySet(), today) as Plan.Add
+        assertTrue(line.lines.single().variantMissing)
+        assertEquals(3, line.lines.single().options.size)
+    }
+
+    @Test fun `confirmed choices are learned, also the sort of a picked product`() {
+        val plan = waterPlan("Ich brauche Wasser und Müller Joghurt Erdbeere")
+        val chosen = VoiceAssistant.choose(plan, mapOf(0 to waters[1]), emptySet())
+        val learned = VoiceAssistant.learn(chosen)
+        assertEquals(mapOf("wasser" to VoiceMemory.Entry("medium", "Gerolsteiner Mineralwasser Medium")), learned)
+        val stored = VoiceMemory.decode(VoiceMemory.encode(VoiceMemory.merge(mapOf("milch" to VoiceMemory.Entry("voll", null)), learned)))
+        assertEquals(setOf("milch", "wasser"), stored.keys)
+        assertEquals(emptyMap<String, VoiceMemory.Entry>(), VoiceMemory.decode("kaputt"))
+    }
+
+    @Test fun `sort words are recognised in many ways`() {
+        assertEquals("wasser", ProductVariants.key("Mineralwasser"))
+        assertEquals("still", ProductVariants.detect("wasser", "Wasser ohne Kohlensäure")?.id)
+        assertEquals("classic", ProductVariants.detect("wasser", "Wasser mit Kohlensäure")?.id)
+        assertEquals("fettarm", ProductVariants.detect("milch", "Frische Milch 1,5%")?.id)
+        assertEquals("haltbar", ProductVariants.detect("milch", "H Milch")?.id)
+        assertTrue(ProductVariants.isOnlyVariant("wasser", "feinperlig"))
+        assertFalse(ProductVariants.isOnlyVariant("wasser", "Butter"))
+        assertEquals("wasser", ProductVariants.strip("wasser", "stilles Wasser"))
+    }
 }
 
