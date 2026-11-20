@@ -547,6 +547,8 @@ private fun OfferOverview(
     // Korbunio Plus voice assistant: the phone's speech recognition (offline where the device offers it),
     // then the rule-based ShoppingCommand and a confirmation dialog. Without a recogniser the dialog opens for typing.
     var voiceText by remember { mutableStateOf<String?>(null) }
+    val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    val onDeviceAi = remember { OnDeviceAiProvider.create(appContext) }
     val speech = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val heard = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
         if (result.resultCode == android.app.Activity.RESULT_OK && !heard.isNullOrBlank()) voiceText = heard
@@ -563,7 +565,7 @@ private fun OfferOverview(
         VoiceAssistantDialog(
             initialText = heard, offers = shownOffers, shoppingItems = state.shoppingItems,
             loyaltyPrograms = state.selectedLoyaltyPrograms, retailerNames = retailerNames, today = today,
-            onListenAgain = listen, onDismiss = { voiceText = null },
+            onListenAgain = listen, onDismiss = { voiceText = null }, ai = onDeviceAi,
             onConfirm = { plan ->
                 voiceText = null
                 when (plan) {

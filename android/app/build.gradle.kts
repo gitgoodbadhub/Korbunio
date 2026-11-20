@@ -110,6 +110,8 @@ dependencies {
     implementation("org.jsoup:jsoup:1.23.2")
     // Korbunio Plus: in-app map for the shopping route (open source, no Google services, no key).
     implementation("org.maplibre.gl:android-sdk:13.7.1")
+    // Korbunio Plus: Gemini Nano on the device (AICore). Standard build only; F-Droid stays free of Google libraries.
+    "standardImplementation"("com.google.mlkit:genai-prompt:1.0.0-beta5")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
