@@ -76,8 +76,13 @@ internal fun VoiceAssistantDialog(
     }
     LaunchedEffect(ai) { aiStatus = ai.status() }
     // What the rules cannot read, or whole sentences without a command word, go to Gemini Nano straight away.
+    // Asked automatically at most once per sentence: effects can be relaunched, the on-device quota is limited.
+    var autoAsked by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(aiStatus, initialText, listening) {
-        if (!listening && aiStatus == OnDeviceAi.Status.AVAILABLE && ShoppingCommand.needsHelp(text)) askNano()
+        if (!listening && aiStatus == OnDeviceAi.Status.AVAILABLE && autoAsked != text && ShoppingCommand.needsHelp(text)) {
+            autoAsked = text
+            askNano()
+        }
     }
     val runnable = when (plan) {
         is VoiceAssistant.Plan.Unknown -> false
