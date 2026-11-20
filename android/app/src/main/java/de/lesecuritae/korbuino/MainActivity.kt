@@ -493,13 +493,20 @@ private fun OfferOverview(
     val groupOf = remember(shownOffers) {
         shownOffers.associate { it.offer.id to ProductGroups.of(it.offer.categoryId, it.productName) }
     }
+    // Korbunio Plus: ranked search (synonyms, stems, typos, sizes); the index is built once per loaded list.
+    val searchIndex = remember(shownOffers) { shownOffers.associate { it.offer.id to OfferSearch.index(it) } }
+    val searchQuery = remember(offerFilter) { OfferSearch.prepare(offerFilter) }
+    val searchScores = remember(searchIndex, searchQuery) {
+        if (offerFilter.isBlank()) emptyMap()
+        else searchIndex.mapValues { (_, indexed) -> OfferSearch.score(searchQuery, indexed) }.filterValues { it > 0 }
+    }
     // The product-group tabs count what the retailer chip and the text filter leave, but not the tab itself.
     val scopedOffers = shownOffers
         .filter { display -> OfferMatcher.isShown(display.offer.validFrom, display.offer.validUntil, today, futureOnly) }
         .filter { display -> retailerFilter == "all" || display.offer.retailerId == retailerFilter }
         .filter { display ->
-            offerFilter.isBlank() || OfferMatcher.matches(offerFilter, listOf(display)).isNotEmpty() ||
-                display.offer.retailerId.contains(offerFilter, ignoreCase = true)
+            offerFilter.isBlank() || display.offer.id in searchScores ||
+                display.offer.retailerId.contains(offerFilter.trim(), ignoreCase = true)
         }
     val groupCounts = scopedOffers.groupingBy { groupOf[it.offer.id] ?: ProductGroups.OTHER }.eachCount()
     val groupTabs = ProductGroups.ORDER.filter { it in groupCounts } + groupCounts.keys.filter { it !in ProductGroups.ORDER }.sorted()
@@ -525,12 +532,19 @@ private fun OfferOverview(
                 else -> offers.sortedWith(compareBy({ effectivePriceCents(it.offer, state.selectedLoyaltyPrograms) }, { it.productName.lowercase() }))
             }
         }
+        // With a search, the best matches come first; equal matches keep the chosen sort order.
+        .let { offers -> if (offerFilter.isBlank()) offers else offers.sortedByDescending { searchScores[it.offer.id] ?: 0 } }
+    val searchSuggestion = remember(offerFilter, visibleOffers.isEmpty(), shownOffers) {
+        if (offerFilter.isBlank() || visibleOffers.isNotEmpty()) null
+        else OfferSearch.suggestion(offerFilter, shownOffers.map { it.productName })
+    }
     val availableLoyaltyPrograms = shownOffers.flatMap { display ->
         LoyaltyBenefits.forOffer(display.offer).map { it.programId to it.displayLabel }
     }.distinctBy { it.first }.sortedBy { it.second }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     // Items in front of the offer rows: search, retailer chips, sort, count, refresh row, message (+ optional rows).
-    val headerItems = 6 + (if (groupTabs.isNotEmpty()) 1 else 0) + (if (availableLoyaltyPrograms.isNotEmpty()) 2 else 0)
+    val headerItems = 6 + (if (groupTabs.isNotEmpty()) 1 else 0) + (if (availableLoyaltyPrograms.isNotEmpty()) 2 else 0) +
+        (if (searchSuggestion != null) 1 else 0)
     // What the fast scroller shows for the row under its handle, depending on the sort.
     val scrollLabel: (Int) -> String = { index ->
         when (val row = visibleOffers.getOrNull(index)) {
@@ -669,7 +683,7 @@ private fun OfferOverview(
                 }
                 item {
                     Text(
-                        "${visibleOffers.size} Treffer · " + when (sortMode) {
+                        "${visibleOffers.size} Treffer · " + if (offerFilter.isNotBlank()) "beste Treffer zuerst" else when (sortMode) {
                             "product" -> "nach Produktname sortiert"
                             "retailer" -> "nach Händler gruppiert"
                             "category" -> "nach Warengruppe sortiert"
@@ -678,6 +692,13 @@ private fun OfferOverview(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                searchSuggestion?.let { suggestion ->
+                    item {
+                        TextButton(onClick = { offerFilter = suggestion }, modifier = Modifier.testTag("search-suggestion")) {
+                            Text("Meinten Sie: „$suggestion“?")
+                        }
+                    }
                 }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
