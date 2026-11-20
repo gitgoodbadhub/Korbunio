@@ -1,13 +1,17 @@
 package de.lesecuritae.korbuino
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import de.lesecuritae.korbuino.data.ShoppingListRow
@@ -72,27 +76,7 @@ internal fun ShoppingListContent(
                 }
             }
             if (state.shoppingItems.isNotEmpty()) item(key = "plan") {
-                Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
-                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Einkaufsplan", style = MaterialTheme.typography.titleMedium)
-                        Text("${plan.actualStores.size} Händler mit zugeordneten aktuellen Angeboten")
-                        Text("Gesamt ohne Pfand: ${plan.actualTotalCents?.let(OfferMatcher::formatPrice) ?: "noch nicht vollständig bekannt"}",
-                            modifier = Modifier.testTag("shopping-total"))
-                        val deposit = plan.positions.sumOf { it.depositCents ?: 0 }
-                        if (deposit > 0) Text("Bekanntes Pfand zusätzlich: ${OfferMatcher.formatPrice(deposit)}")
-                        val bonus = plan.positions.sumOf { it.cashbackCents ?: 0 }
-                        if (bonus > 0) Text("Bonusguthaben nach dem Kauf: ${OfferMatcher.formatPrice(bonus)} (nicht abgezogen)")
-                        plan.suggestedTotalCents?.let {
-                            Text("Vergleich für dieselben Mengen: ${OfferMatcher.formatPrice(it)} ohne Pfand, bei ${plan.cheapestStores.size} Händlern")
-                        }
-                        if (plan.savedTrips > 0) Text("Spartipp: ${plan.savedTrips} Einkaufwege sparen für ${OfferMatcher.formatPrice(plan.consolidationExtraCents)} mehr. Angebote ausdrücklich auswählen.")
-                        if (plan.unmatchedItems.isNotEmpty()) Text("Für ${plan.unmatchedItems.size} Positionen fehlt ein vollständiger aktueller Vergleichspreis.")
-                        if (plan.actualStores.isNotEmpty()) {
-                            Button(onClick = { actions.route(plan.actualStores) }, enabled = !state.storeRoute.loading,
-                                modifier = Modifier.testTag("shopping-route")) { Text("Filialen & Route anzeigen") }
-                        }
-                    }
-                }
+                ShoppingPlanCard(plan, retailerNames, routeLoading = state.storeRoute.loading, onRoute = { actions.route(plan.actualStores) })
             }
             if (state.storeRoute.requested) item(key = "route") {
                 StoreRouteCard(state.storeRoute, retailerNames, onClose = actions.clearRoute, postalCode = state.postalCode)
@@ -204,5 +188,58 @@ internal fun offerPriceLabel(display: OfferDisplay, selectedPrograms: Set<String
             offer.multiBuyCondition?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
     } else {
         OfferPricing.quote(offer, 1, selectedPrograms).totalCents?.let(OfferMatcher::formatPrice) ?: "Preis nicht belegt"
+    }
+}
+
+/** Compact plan: shops as badges, one total with a verdict, details on demand. */
+@Composable
+internal fun ShoppingPlanCard(plan: ShoppingPlan.Plan, retailerNames: Map<String, String>, routeLoading: Boolean, onRoute: () -> Unit) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.testTag("shopping-plan")) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Einkaufsplan", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text(plan.actualTotalCents?.let(OfferMatcher::formatPrice) ?: "–", style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold, modifier = Modifier.testTag("shopping-total"))
+                TextButton(onClick = { expanded = !expanded }, modifier = Modifier.testTag("shopping-plan-toggle")) {
+                    Text(if (expanded) "▴" else "▾")
+                }
+            }
+            if (plan.actualStores.isNotEmpty()) {
+                Row(Modifier.horizontalScroll(rememberScrollState()).testTag("shopping-plan-badges"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    plan.actualStores.forEach { id -> RetailerBadge(id, retailerNames[id] ?: id) }
+                }
+            }
+            when (val verdict = PlanSummary.verdict(plan.actualTotalCents, plan.suggestedTotalCents)) {
+                PlanSummary.Verdict.Cheapest -> Text("✓ günstigste Auswahl", color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("shopping-verdict"))
+                is PlanSummary.Verdict.Cheaper -> Text("Günstiger möglich: ${OfferMatcher.formatPrice(verdict.cheaperTotalCents)} " +
+                    "(−${OfferMatcher.formatPrice(verdict.savingCents)})", color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("shopping-verdict"))
+                PlanSummary.Verdict.Unknown -> if (plan.unmatchedItems.isNotEmpty()) {
+                    Text("${plan.unmatchedItems.size} ohne aktuelles Angebot", style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.testTag("shopping-verdict"))
+                }
+            }
+            if (expanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.testTag("shopping-plan-details")) {
+                    val small = MaterialTheme.typography.bodySmall
+                    Text("Summe deiner ausgewählten Angebote, ohne Pfand.", style = small)
+                    plan.suggestedTotalCents?.let {
+                        Text("Günstigster Preis für dieselben Mengen: ${OfferMatcher.formatPrice(it)} bei ${plan.cheapestStores.size} Händlern.", style = small)
+                    }
+                    val deposit = plan.positions.sumOf { it.depositCents ?: 0 }
+                    if (deposit > 0) Text("Pfand zusätzlich: ${OfferMatcher.formatPrice(deposit)}", style = small)
+                    val bonus = plan.positions.sumOf { it.cashbackCents ?: 0 }
+                    if (bonus > 0) Text("Bonusguthaben nach dem Kauf: ${OfferMatcher.formatPrice(bonus)} (nicht abgezogen)", style = small)
+                    if (plan.savedTrips > 0) Text("Spartipp: ${plan.savedTrips} Einkaufswege weniger für " +
+                        "${OfferMatcher.formatPrice(plan.consolidationExtraCents)} mehr.", style = small)
+                    if (plan.unmatchedItems.isNotEmpty()) Text("Ohne aktuelles Angebot: ${plan.unmatchedItems.joinToString()}", style = small)
+                }
+            }
+            if (plan.actualStores.isNotEmpty()) {
+                Button(onClick = onRoute, enabled = !routeLoading, modifier = Modifier.testTag("shopping-route")) { Text("Filialen & Route anzeigen") }
+            }
+        }
     }
 }
