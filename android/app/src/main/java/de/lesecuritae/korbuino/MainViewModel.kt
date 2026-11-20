@@ -203,6 +203,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Korbunio Plus voice assistant: adds the confirmed lines, with offer where one was picked. */
+    fun addVoiceLines(lines: List<VoiceAssistant.Line>) {
+        if (lines.isEmpty()) return
+        viewModelScope.launch {
+            val dao = database.shoppingListDao()
+            lines.forEach { line ->
+                val quantity = line.item.quantity.coerceIn(1, 99)
+                val display = line.offer
+                if (display != null) {
+                    val itemId = "offer:${display.offer.retailerId}:${display.offer.id}"
+                    val existing = dao.allItems().firstOrNull { it.listId == "default" && it.itemId == itemId }
+                    dao.upsertAll(listOf(existing?.copy(quantity = (existing.quantity + quantity).coerceAtMost(999), checked = false)
+                        ?: ShoppingListItemEntity("default", display.offer.productId, quantity = quantity, itemId = itemId,
+                            retailerId = display.offer.retailerId, offerId = display.offer.id)))
+                } else {
+                    val name = line.item.name.replaceFirstChar { it.titlecase() }.take(120)
+                    val note = line.item.maxPriceCents?.let { "bis " + OfferMatcher.formatPrice(it) }.orEmpty()
+                    val id = "manual:" + UUID.randomUUID().toString()
+                    database.productDao().upsertAll(listOf(ProductEntity(id, name, normalizedKey = id)))
+                    dao.upsertAll(listOf(ShoppingListItemEntity("default", id, quantity = quantity, note = note)))
+                }
+            }
+            message("${lines.size} Artikel per Sprache hinzugefügt")
+        }
+    }
+
+    fun removeShoppingItems(rows: List<ShoppingListRow>) {
+        if (rows.isEmpty()) return
+        viewModelScope.launch {
+            rows.forEach { database.shoppingListDao().remove(it.itemId) }
+            _state.value = _state.value.copy(removedShoppingItem = rows.last())
+        }
+    }
+
     fun saveFavorite(query: String, retailerIds: Set<String>, maxPriceCents: Int?, currentWeek: Boolean,
                      nextWeek: Boolean, notifications: Boolean, existingId: String? = null) {
         val clean = query.trim().take(120)
