@@ -92,4 +92,64 @@ class VoiceAssistantTest {
         assertEquals(Plan.Search("kaffee", 600), plan("Zeig mir Kaffee unter 6 Euro"))
         assertTrue(plan("bitte") is Plan.Unknown)
     }
+
+    private val drinks = listOf(
+        offer("w1", "dm", "Curafit Schnupfenspray Meerwasser", 179),
+        offer("w2", "rewe", "Vöslauer Mineralwasser", 79),
+        offer("w3", "marktguru-lidl", "Saskia Mineralwasser still", 19),
+        offer("w4", "kaufland", "Tafelwasser", 25),
+        offer("m1", "rewe", "Müllermilch Schoko", 79),
+        offer("m2", "edeka", "Frische Vollmilch 3,8%", 99),
+        offer("m3", "aldi-sued", "H-Milch fettarm", 85),
+    )
+
+    private fun drinkPlan(text: String) = VoiceAssistant.plan(ShoppingCommand.parse(text), drinks, emptyList(), emptySet(), today) as Plan.Add
+
+    @Test fun `general water offers real water to choose and never nasal spray`() {
+        val line = drinkPlan("Ich brauche Wasser").lines.single()
+        assertEquals("w3", line.offer?.offer?.id)
+        assertEquals(listOf("w3", "w4", "w2"), line.options.map { it.offer.offer.id })
+        assertTrue(line.needsChoice)
+    }
+
+    @Test fun `milk is milk, not a milk drink`() {
+        val line = drinkPlan("Füge Milch hinzu").lines.single()
+        assertEquals("m3", line.offer?.offer?.id)
+        assertEquals(setOf("m2", "m3"), line.options.map { it.offer.offer.id }.toSet())
+        // Asked by name, the milk drink is found.
+        assertEquals("m1", drinkPlan("Füge Müllermilch hinzu").lines.single().offer?.offer?.id)
+    }
+
+    @Test fun `only loose matches are shown but not picked`() {
+        val sprayOnly = VoiceAssistant.plan(ShoppingCommand.parse("Ich brauche Wasser"), drinks.take(1), emptyList(), emptySet(), today) as Plan.Add
+        val line = sprayOnly.lines.single()
+        assertNull(line.offer)
+        assertTrue(line.uncertain)
+        assertEquals(listOf("w1"), line.options.map { it.offer.offer.id })
+    }
+
+    @Test fun `exact wishes get the best match without a choice`() {
+        val line = drinkPlan("Füge Vöslauer Mineralwasser hinzu").lines.single()
+        assertEquals("w2", line.offer?.offer?.id)
+        assertFalse(line.needsChoice)
+    }
+
+    @Test fun `picks from the dialog replace the proposal`() {
+        val plan = drinkPlan("Ich brauche Wasser und Milch")
+        val chosen = VoiceAssistant.choose(plan, mapOf(0 to drinks[1], 1 to null), emptySet())
+        assertEquals("w2", chosen.lines[0].offer?.offer?.id)
+        assertEquals(79, chosen.lines[0].unitCents)
+        assertNull(chosen.lines[1].offer)
+        assertEquals(79, chosen.totalCents)
+    }
+
+    @Test fun `kinds of a product are told apart from other things`() {
+        assertTrue(OfferSearch.isKind("milch", "vollmilch"))
+        assertTrue(OfferSearch.isKind("wasser", "mineralwasser"))
+        assertTrue(OfferSearch.isKind("ei", "eier"))
+        assertFalse(OfferSearch.isKind("milch", "mullermilch"))
+        assertFalse(OfferSearch.isKind("wasser", "meerwasser"))
+        assertFalse(OfferSearch.isKind("milch", "buttermilch"))
+    }
 }
+

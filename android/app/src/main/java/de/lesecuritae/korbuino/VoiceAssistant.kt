@@ -11,7 +11,23 @@ import de.lesecuritae.korbuino.data.ShoppingListRow
  */
 object VoiceAssistant {
     /** One wanted product and the offer picked for it (null: no fitting offer, it becomes a free list entry). */
-    data class Line(val item: ShoppingCommand.Item, val offer: OfferDisplay?, val unitCents: Int?, val overLimitOnly: Boolean = false)
+    data class Line(
+        val item: ShoppingCommand.Item,
+        val offer: OfferDisplay?,
+        val unitCents: Int?,
+        val overLimitOnly: Boolean = false,
+        /** A small choice (cheapest first) for general words like "Wasser"; the user picks in the dialog. */
+        val options: List<Option> = emptyList(),
+        /** True when only loosely related offers exist ("Meerwasser" for "Wasser"): nothing is picked, the user decides. */
+        val uncertain: Boolean = false,
+    ) {
+        val needsChoice: Boolean get() = options.size > 1
+    }
+
+    data class Option(val offer: OfferDisplay, val unitCents: Int)
+
+    /** At most this many offers are offered per product. */
+    const val MAX_OPTIONS = 4
 
     sealed interface Plan {
         data class Add(val lines: List<Line>, val budgetCents: Int?) : Plan {
@@ -62,19 +78,44 @@ object VoiceAssistant {
 
     private fun line(item: ShoppingCommand.Item, index: List<Pair<OfferDisplay, OfferSearch.Indexed>>, loyalty: Set<String>): Line {
         val query = OfferSearch.prepare(item.name)
-        val scored = index.map { (display, indexed) -> display to OfferSearch.score(query, indexed) }.filter { it.second > 0 }
-        val best = scored.maxOfOrNull { it.second }?.takeIf { it >= MIN_PICK_SCORE } ?: return Line(item, null, null)
-        val candidates = scored.filter { it.second >= best * TIER }
-            .mapNotNull { (display, score) -> unitCents(display, loyalty)?.let { Triple(display, score, it) } }
-        // Cheapest first; with equal prices the closer match wins.
-        val ordered = candidates.sortedWith(compareBy({ it.third }, { -it.second }))
-        val within = ordered.firstOrNull { item.maxPriceCents == null || it.third <= item.maxPriceCents }
-        return when {
-            within != null -> Line(item, within.first, within.third)
-            ordered.isNotEmpty() -> Line(item, null, null, overLimitOnly = true)
-            else -> Line(item, null, null)
+        val scored = index.mapNotNull { (display, indexed) ->
+            OfferSearch.score(query, indexed).takeIf { it > 0 }?.let { Triple(display, indexed, it) }
         }
+        if (scored.isEmpty()) return Line(item, null, null)
+        // The product itself ("Vollmilch", "Mineralwasser") before things that only contain the word
+        // ("Müllermilch", "Schnupfenspray Meerwasser").
+        val same = scored.filter { OfferSearch.isSameProduct(query, it.second) }
+        val uncertain = same.isEmpty()
+        val pool = (if (uncertain) scored.filter { it.third >= MIN_PICK_SCORE } else same)
+        if (pool.isEmpty()) return Line(item, null, null)
+        // Stay in one product group: water from the drinks, not from the chemist's shelf.
+        val groups = pool.groupingBy { ProductGroups.of(it.first.offer.categoryId, it.first.productName) }.eachCount()
+        val top = groups.values.maxOrNull() ?: 0
+        val mainGroups = groups.filterValues { it == top }.keys
+        val priced = pool.filter { ProductGroups.of(it.first.offer.categoryId, it.first.productName) in mainGroups }
+            .mapNotNull { (display, _, score) -> unitCents(display, loyalty)?.let { Triple(display, score, it) } }
+        val within = priced.filter { item.maxPriceCents == null || it.third <= item.maxPriceCents }
+        if (within.isEmpty()) return Line(item, null, null, overLimitOnly = priced.isNotEmpty())
+        val bestScore = within.maxOf { it.second }
+        val ordered = within.sortedWith(compareBy({ it.third }, { -it.second }))
+        val options = ordered.distinctBy { it.first.productName.lowercase() to it.first.offer.retailerId }
+            .take(MAX_OPTIONS).map { Option(it.first, it.third) }
+        // Exact wishes (brand, size, several words) get the best match; general words the cheapest real one.
+        val general = query.terms.size == 1 && query.quantities.isEmpty()
+        val pick = when {
+            uncertain -> null
+            general -> ordered.first()
+            else -> ordered.filter { it.second == bestScore }.minByOrNull { it.third }
+        }
+        return Line(item, pick?.first, pick?.third, options = if (general || uncertain) options else emptyList(), uncertain = uncertain)
     }
+
+    /** The plan with the user's picks from the dialog; null keeps the product as a free note. */
+    fun choose(plan: Plan.Add, picks: Map<Int, OfferDisplay?>, loyaltyPrograms: Set<String>): Plan.Add =
+        plan.copy(lines = plan.lines.mapIndexed { i, line ->
+            if (i !in picks) line
+            else picks[i].let { offer -> line.copy(offer = offer, unitCents = offer?.let { unitCents(it, loyaltyPrograms) }) }
+        })
 
     private fun matchingRows(name: String, rows: List<ShoppingListRow>): List<ShoppingListRow> {
         val query = OfferSearch.prepare(name)
@@ -89,6 +130,8 @@ object VoiceAssistant {
             val withOffer = plan.lines.count { it.offer != null }
             append("${plan.lines.size} Artikel auf die Liste")
             if (withOffer > 0) append(", $withOffer mit Angebot für zusammen ${OfferMatcher.formatPrice(plan.totalCents)}")
+            val open = plan.lines.count { it.needsChoice && it.offer == null }
+            if (open > 0) append(". Bei $open bitte die Sorte wählen")
             if (plan.budgetCents != null) append(
                 if (plan.overBudget) ". Budget von ${OfferMatcher.formatPrice(plan.budgetCents)} überschritten"
                 else ". Budget von ${OfferMatcher.formatPrice(plan.budgetCents)} reicht",

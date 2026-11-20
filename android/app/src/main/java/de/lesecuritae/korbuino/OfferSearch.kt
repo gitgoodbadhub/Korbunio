@@ -189,6 +189,37 @@ object OfferSearch {
         return 0
     }
 
+    /**
+     * Prefixes that describe a kind of the same product: "Voll|milch" and "Mineral|wasser" are milk and water,
+     * "Müller|milch" (a milk drink) and "Meer|wasser" (nasal spray) are not.
+     */
+    private val neutralPrefixes = setOf(
+        "voll", "frisch", "fettarm", "fettarme", "h", "bio", "trink", "weide", "alpen", "land", "heu", "haltbar",
+        "laktosefrei", "mineral", "tafel", "quell", "heil", "sprudel", "natur", "vollkorn", "mehrkorn", "weizen",
+        "roggen", "dinkel", "misch", "toast", "kaese", "kase", "marken", "sussrahm", "suessrahm", "sauerrahm",
+        "rinder", "schweine", "hahnchen", "speise", "tiefkuhl",
+    )
+
+    /** True when [token] names the product [term] itself (or a neutral kind of it), not something that only contains the word. */
+    fun isKind(term: String, token: String): Boolean {
+        if (token == term) return true
+        val stem = stem(term)
+        if (token == stem || stem(token) == stem) return true
+        if (token.startsWith(term) && token.length - term.length <= 2) return true // plural: Eier, Brötchen
+        if (token.endsWith(term) && token.length > term.length) return token.dropLast(term.length).trimEnd('-') in neutralPrefixes
+        return false
+    }
+
+    /**
+     * True when the offer is the asked product itself: at least one query word names a head word of the
+     * product name (see [isKind]); brand, size and other words may match elsewhere.
+     */
+    fun isSameProduct(query: Query, offer: Indexed): Boolean = query.terms.any { alternatives ->
+        alternatives.any { term ->
+            if (' ' in term) offer.nameText.contains(term) else offer.nameTokens.any { isKind(term, it) }
+        }
+    }
+
     /** Light German stemming for plural and inflection endings; keeps at least four letters. */
     fun stem(word: String): String {
         for (ending in listOf("en", "er", "e", "n", "s")) {

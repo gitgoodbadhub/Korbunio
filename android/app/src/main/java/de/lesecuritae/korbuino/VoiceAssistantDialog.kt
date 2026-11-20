@@ -20,6 +20,11 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.material3.RadioButton
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -57,9 +62,12 @@ internal fun VoiceAssistantDialog(
     var aiNote by remember(initialText) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val ruleCommand = remember(text) { ShoppingCommand.parse(text) }
-    val plan = remember(aiCommand, ruleCommand, offers, shoppingItems, loyaltyPrograms) {
+    val proposed = remember(aiCommand, ruleCommand, offers, shoppingItems, loyaltyPrograms) {
         VoiceAssistant.plan(aiCommand ?: ruleCommand, offers, shoppingItems, loyaltyPrograms, today)
     }
+    // The user's picks among the offered sorts ("Welches Wasser?"); null = only a note on the list.
+    val picks = remember(proposed) { mutableStateMapOf<Int, OfferDisplay?>() }
+    val plan = if (proposed is VoiceAssistant.Plan.Add && picks.isNotEmpty()) VoiceAssistant.choose(proposed, picks.toMap(), loyaltyPrograms) else proposed
     val askNano: () -> Unit = {
         val asked = text
         if (!aiBusy && asked.isNotBlank()) {
@@ -113,7 +121,9 @@ internal fun VoiceAssistantDialog(
                     aiStatus = OnDeviceAi.Status.DOWNLOADING
                     scope.launch { ai.download(); aiStatus = ai.status() }
                 })
-                if (plan is VoiceAssistant.Plan.Add) plan.lines.forEach { line -> VoiceLine(line, retailerNames) }
+                if (plan is VoiceAssistant.Plan.Add) plan.lines.forEachIndexed { index, line ->
+                    VoiceLine(line, retailerNames, onPick = { picks[index] = it })
+                }
             }
         },
         confirmButton = {
@@ -132,21 +142,50 @@ internal fun VoiceAssistantDialog(
 }
 
 @Composable
-private fun VoiceLine(line: VoiceAssistant.Line, retailerNames: Map<String, String>) {
+private fun VoiceLine(line: VoiceAssistant.Line, retailerNames: Map<String, String>, onPick: (OfferDisplay?) -> Unit) {
     val item = line.item
     val title = (if (item.quantity > 1) "${item.quantity}× " else "") + item.name.replaceFirstChar { it.titlecase() } +
         (item.maxPriceCents?.let { " (bis ${OfferMatcher.formatPrice(it)})" } ?: "")
     Column(modifier = Modifier.fillMaxWidth().testTag("voice-line")) {
         Text(title, style = MaterialTheme.typography.bodyLarge)
         val offer = line.offer
-        val detail = when {
-            offer != null -> "${offer.productName} · ${retailerNames[offer.offer.retailerId] ?: offer.offer.retailerId}" +
-                (line.unitCents?.let { " · ${OfferMatcher.formatPrice(it)}" } ?: "")
-            line.overLimitOnly -> "Nur teurere Angebote – kommt als Notiz auf die Liste"
-            else -> "Kein Angebot – kommt als Notiz auf die Liste"
+        if (line.needsChoice) {
+            Text(
+                when {
+                    line.uncertain -> "Kein genauer Treffer – passt eins davon?"
+                    offer == null -> "Welche Sorte?"
+                    else -> "Günstigste vorausgewählt – oder:"
+                },
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            line.options.forEach { option ->
+                ChoiceRow(selected = offer?.offer?.id == option.offer.offer.id, tag = "voice-option",
+                    text = "${option.offer.productName} · ${retailerNames[option.offer.offer.retailerId] ?: option.offer.offer.retailerId}" +
+                        " · ${OfferMatcher.formatPrice(option.unitCents)}",
+                    onClick = { onPick(option.offer) })
+            }
+            ChoiceRow(selected = offer == null, tag = "voice-option-note", text = "Ohne Angebot, nur auf die Liste", onClick = { onPick(null) })
+        } else {
+            val detail = when {
+                offer != null -> "${offer.productName} · ${retailerNames[offer.offer.retailerId] ?: offer.offer.retailerId}" +
+                    (line.unitCents?.let { " · ${OfferMatcher.formatPrice(it)}" } ?: "")
+                line.overLimitOnly -> "Nur teurere Angebote – kommt als Notiz auf die Liste"
+                else -> "Kein Angebot – kommt als Notiz auf die Liste"
+            }
+            Text(detail, style = MaterialTheme.typography.bodySmall,
+                color = if (offer != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text(detail, style = MaterialTheme.typography.bodySmall,
-            color = if (offer != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun ChoiceRow(selected: Boolean, tag: String, text: String, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, onClick = onClick).testTag(tag),
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Text(text, style = MaterialTheme.typography.bodySmall)
     }
 }
 
