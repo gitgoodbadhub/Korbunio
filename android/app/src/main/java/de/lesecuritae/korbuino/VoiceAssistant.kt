@@ -20,11 +20,22 @@ object VoiceAssistant {
         val options: List<Option> = emptyList(),
         /** True when only loosely related offers exist ("Meerwasser" for "Wasser"): nothing is picked, the user decides. */
         val uncertain: Boolean = false,
+        /** Known sorts of this product ("still", "medium", "classic") to ask for, and the one in use. */
+        val variants: List<ProductVariants.Variant> = emptyList(),
+        val variant: ProductVariants.Variant? = null,
+        val variantSource: VariantSource = VariantSource.NONE,
+        /** True when no offer of the wanted sort exists; the other sorts are shown instead. */
+        val variantMissing: Boolean = false,
+        /** Key under which the choice is remembered ("wasser"); null for exact wishes. */
+        val memoryKey: String? = null,
+        val rememberedProduct: Boolean = false,
     ) {
         val needsChoice: Boolean get() = options.size > 1
     }
 
     data class Option(val offer: OfferDisplay, val unitCents: Int)
+
+    enum class VariantSource { NONE, SPOKEN, REMEMBERED, PICKED }
 
     /** At most this many offers are offered per product. */
     const val MAX_OPTIONS = 4
@@ -53,12 +64,18 @@ object VoiceAssistant {
         shoppingItems: List<ShoppingListRow>,
         loyaltyPrograms: Set<String> = emptySet(),
         today: String? = null,
+        memory: Map<String, VoiceMemory.Entry> = emptyMap(),
+        /** Sorts picked in the dialog per line; a null value means "any sort". */
+        variantPicks: Map<Int, String?> = emptyMap(),
     ): Plan = when (command) {
         is ShoppingCommand.Command.Add -> {
             val current = if (today == null) offers
             else offers.filter { OfferMatcher.isShown(it.offer.validFrom, it.offer.validUntil, today, false) }
             val index = current.map { it to OfferSearch.index(it) }
-            Plan.Add(command.items.map { line(it, index, loyaltyPrograms) }, command.budgetCents)
+            val items = withVariantAnswers(command.items)
+            Plan.Add(items.mapIndexed { i, item ->
+                line(item, index, loyaltyPrograms, memory, if (i in variantPicks) Pick(variantPicks[i]) else null)
+            }, command.budgetCents)
         }
         is ShoppingCommand.Command.Search -> Plan.Search(command.query, command.maxPriceCents)
         is ShoppingCommand.Command.Remove -> {
@@ -76,8 +93,82 @@ object VoiceAssistant {
     fun unitCents(display: OfferDisplay, loyaltyPrograms: Set<String>): Int? =
         OfferPricing.quote(display.offer, 1, loyaltyPrograms).totalCents
 
-    private fun line(item: ShoppingCommand.Item, index: List<Pair<OfferDisplay, OfferSearch.Indexed>>, loyalty: Set<String>): Line {
-        val query = OfferSearch.prepare(item.name)
+    private data class Pick(val variantId: String?)
+
+    /** "Wasser, feinperlig": a piece that only names a sort belongs to the product before it. */
+    fun withVariantAnswers(items: List<ShoppingCommand.Item>): List<ShoppingCommand.Item> {
+        val result = mutableListOf<ShoppingCommand.Item>()
+        for (item in items) {
+            val previous = result.lastOrNull()
+            if (previous != null && ProductVariants.isOnlyVariant(ProductVariants.key(previous.name), item.name)) {
+                result[result.lastIndex] = previous.copy(
+                    name = previous.name + " " + item.name,
+                    maxPriceCents = previous.maxPriceCents ?: item.maxPriceCents,
+                )
+            } else result += item
+        }
+        return result
+    }
+
+    private fun line(
+        item: ShoppingCommand.Item,
+        index: List<Pair<OfferDisplay, OfferSearch.Indexed>>,
+        loyalty: Set<String>,
+        memory: Map<String, VoiceMemory.Entry> = emptyMap(),
+        pick: Pick? = null,
+    ): Line {
+        val key = ProductVariants.key(item.name)
+        val spoken = ProductVariants.detect(key, item.name)
+        val baseName = ProductVariants.strip(key, item.name).ifBlank { key ?: item.name }
+        val query = OfferSearch.prepare(baseName)
+        val general = query.terms.size == 1 && query.quantities.isEmpty()
+        val memoryKey = if (general) key ?: OfferSearch.normalize(baseName) else null
+        val remembered = memoryKey?.let { memory[it] }
+        val (variant, source) = when {
+            pick != null -> ProductVariants.byId(key, pick.variantId) to VariantSource.PICKED
+            spoken != null -> spoken to VariantSource.SPOKEN
+            remembered?.variant != null && ProductVariants.byId(key, remembered.variant) != null ->
+                ProductVariants.byId(key, remembered.variant) to VariantSource.REMEMBERED
+            else -> null to VariantSource.NONE
+        }
+        val base = match(item, query, index, loyalty)
+            .copy(variants = ProductVariants.variants(key), variant = variant, variantSource = source, memoryKey = memoryKey)
+        val all = base.options
+        if (all.isEmpty()) return base
+        if (base.uncertain) return base.copy(options = all.take(MAX_OPTIONS))
+        // Only the wanted sort; if there is none on offer, all sorts stay visible.
+        val ofSort = if (variant == null) all else all.filter { ProductVariants.matches(variant, offerText(it.offer)) }
+        val shown = ofSort.ifEmpty { all }
+        val favourite = if (source == VariantSource.PICKED) null
+        else remembered?.product?.let { name -> shown.firstOrNull { it.offer.productName.equals(name, ignoreCase = true) } }
+        // General words: the remembered product or the cheapest of the sort, with a small choice.
+        // Exact wishes keep their best match unless a spoken sort says otherwise.
+        val chosen = when {
+            general -> favourite ?: shown.first()
+            variant != null && ofSort.isNotEmpty() && ofSort.none { it.offer.offer.id == base.offer?.offer?.id } -> ofSort.first()
+            else -> null
+        }
+        return base.copy(
+            offer = chosen?.offer ?: base.offer,
+            unitCents = chosen?.unitCents ?: base.unitCents,
+            options = if (general) shown.take(MAX_OPTIONS) else emptyList(),
+            variantMissing = variant != null && ofSort.isEmpty(),
+            rememberedProduct = favourite != null,
+        )
+    }
+
+    private fun offerText(display: OfferDisplay) =
+        "${display.productName} ${display.brand} ${display.offer.description} ${display.offer.packSize.orEmpty()}"
+
+    /** What [VoiceMemory] keeps from a confirmed plan: per general product word the sort and the product taken. */
+    fun learn(plan: Plan.Add): Map<String, VoiceMemory.Entry> = plan.lines.mapNotNull { line ->
+        val key = line.memoryKey ?: return@mapNotNull null
+        val offer = line.offer ?: return@mapNotNull null
+        val sort = line.variant ?: ProductVariants.detect(ProductVariants.key(key), offerText(offer))
+        key to VoiceMemory.Entry(sort?.id, offer.productName)
+    }.toMap()
+
+    private fun match(item: ShoppingCommand.Item, query: OfferSearch.Query, index: List<Pair<OfferDisplay, OfferSearch.Indexed>>, loyalty: Set<String>): Line {
         val scored = index.mapNotNull { (display, indexed) ->
             OfferSearch.score(query, indexed).takeIf { it > 0 }?.let { Triple(display, indexed, it) }
         }
@@ -99,7 +190,7 @@ object VoiceAssistant {
         val bestScore = within.maxOf { it.second }
         val ordered = within.sortedWith(compareBy({ it.third }, { -it.second }))
         val options = ordered.distinctBy { it.first.productName.lowercase() to it.first.offer.retailerId }
-            .take(MAX_OPTIONS).map { Option(it.first, it.third) }
+            .map { Option(it.first, it.third) }
         // Exact wishes (brand, size, several words) get the best match; general words the cheapest real one.
         val general = query.terms.size == 1 && query.quantities.isEmpty()
         val pick = when {
@@ -107,7 +198,8 @@ object VoiceAssistant {
             general -> ordered.first()
             else -> ordered.filter { it.second == bestScore }.minByOrNull { it.third }
         }
-        return Line(item, pick?.first, pick?.third, options = if (general || uncertain) options else emptyList(), uncertain = uncertain)
+        // All candidates go back to line(), which narrows them by sort and keeps a small choice.
+        return Line(item, pick?.first, pick?.third, options = options, uncertain = uncertain)
     }
 
     /** The plan with the user's picks from the dialog; null keeps the product as a free note. */

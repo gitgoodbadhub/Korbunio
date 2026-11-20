@@ -89,5 +89,29 @@ class VoiceAssistantDialogTest {
             assertEquals("b", (confirmed as VoiceAssistant.Plan.Add).lines.single().offer?.offer?.id)
         }
     }
+
+    @Test fun sortChipsNarrowTheChoiceAndMemoryIsShown() {
+        fun water(id: String, name: String, cents: Int) = OfferDisplay(
+            OfferEntity(id = id, retailerId = "rewe", productId = "p$id", externalId = id, priceCents = cents,
+                sourceUrl = "https://example.invalid/$id", cachedAt = 0L),
+            productName = name,
+        )
+        val waters = listOf(water("a", "Saskia Mineralwasser still", 19), water("b", "Gerolsteiner Mineralwasser Medium", 69))
+        var confirmed: VoiceAssistant.Plan? = null
+        var forgotten: String? = null
+        compose.setContent {
+            MaterialTheme {
+                VoiceAssistantDialog("Ich brauche Wasser", waters, emptyList(), emptySet(), emptyMap(), "2026-11-20",
+                    onListenAgain = {}, onDismiss = {}, onConfirm = { confirmed = it },
+                    memory = mapOf("wasser" to VoiceMemory.Entry("still", null)), onForget = { forgotten = it })
+            }
+        }
+        compose.onNodeWithTag("voice-variant-still").assert(hasText("gemerkt", substring = true))
+        compose.onNodeWithTag("voice-variant-medium").performClick()
+        compose.onNodeWithTag("voice-confirm").performClick()
+        compose.runOnIdle {
+            assertEquals("b", (confirmed as VoiceAssistant.Plan.Add).lines.single().offer?.offer?.id)
+        }
+    }
 }
 
