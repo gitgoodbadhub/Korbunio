@@ -57,6 +57,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -542,6 +544,40 @@ private fun OfferOverview(
         LoyaltyBenefits.forOffer(display.offer).map { it.programId to it.displayLabel }
     }.distinctBy { it.first }.sortedBy { it.second }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // Korbunio Plus voice assistant: the phone's speech recognition (offline where the device offers it),
+    // then the rule-based ShoppingCommand and a confirmation dialog. Without a recogniser the dialog opens for typing.
+    var voiceText by remember { mutableStateOf<String?>(null) }
+    val speech = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val heard = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+        if (result.resultCode == android.app.Activity.RESULT_OK && !heard.isNullOrBlank()) voiceText = heard
+    }
+    val listen: () -> Unit = {
+        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "de-DE")
+            .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Was soll auf die Einkaufsliste?")
+            .putExtra(android.speech.RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+        try { voiceText = null; speech.launch(intent) } catch (e: android.content.ActivityNotFoundException) { voiceText = "" }
+    }
+    voiceText?.let { heard ->
+        VoiceAssistantDialog(
+            initialText = heard, offers = shownOffers, shoppingItems = state.shoppingItems,
+            loyaltyPrograms = state.selectedLoyaltyPrograms, retailerNames = retailerNames, today = today,
+            onListenAgain = listen, onDismiss = { voiceText = null },
+            onConfirm = { plan ->
+                voiceText = null
+                when (plan) {
+                    is VoiceAssistant.Plan.Add -> { viewModel.addVoiceLines(plan.lines); selectedTab = 1 }
+                    is VoiceAssistant.Plan.Search -> { offerFilter = plan.query.take(80); selectedTab = 0 }
+                    is VoiceAssistant.Plan.Remove -> { viewModel.removeShoppingItems(plan.rows); selectedTab = 1 }
+                    VoiceAssistant.Plan.ShowList -> selectedTab = 1
+                    is VoiceAssistant.Plan.Route -> { viewModel.planRoute(plan.retailerIds); selectedTab = 1 }
+                    is VoiceAssistant.Plan.Unknown -> Unit
+                }
+                Unit
+            },
+        )
+    }
     // Items in front of the offer rows: search, retailer chips, sort, count, refresh row, message (+ optional rows).
     val headerItems = 6 + (if (groupTabs.isNotEmpty()) 1 else 0) + (if (availableLoyaltyPrograms.isNotEmpty()) 2 else 0) +
         (if (searchSuggestion != null) 1 else 0)
@@ -565,6 +601,10 @@ private fun OfferOverview(
             TextButton(onClick = onBack) { Text("Zurück") }
             Text("Angebote", style = MaterialTheme.typography.headlineMedium)
             Spacer(modifier = Modifier.weight(1f))
+            IconButton(onClick = listen, modifier = Modifier.testTag("voice-button")
+                .semantics { contentDescription = "Sprachassistent" }) {
+                Text("🎤", style = MaterialTheme.typography.headlineSmall)
+            }
             IconButton(onClick = openSettings) {
                 Text("⚙", style = MaterialTheme.typography.headlineSmall)
             }
