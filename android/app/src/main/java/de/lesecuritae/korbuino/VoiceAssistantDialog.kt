@@ -70,9 +70,9 @@ internal fun VoiceAssistantDialog(
         }
     }
     LaunchedEffect(ai) { aiStatus = ai.status() }
-    // What the rules cannot read goes to Gemini Nano straight away.
+    // What the rules cannot read, or whole sentences without a command word, go to Gemini Nano straight away.
     LaunchedEffect(aiStatus, initialText) {
-        if (aiStatus == OnDeviceAi.Status.AVAILABLE && ruleCommand is ShoppingCommand.Command.Unknown) askNano()
+        if (aiStatus == OnDeviceAi.Status.AVAILABLE && ShoppingCommand.needsHelp(text)) askNano()
     }
     val runnable = when (plan) {
         is VoiceAssistant.Plan.Unknown -> false
