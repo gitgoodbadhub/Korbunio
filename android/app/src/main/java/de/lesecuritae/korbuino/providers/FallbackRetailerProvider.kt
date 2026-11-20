@@ -9,6 +9,8 @@ class FallbackRetailerProvider(
     private val primary: RetailerProvider,
     private val fallback: RetailerProvider,
     private val surfacePrimaryFailureWhenFallbackEmpty: Boolean = false,
+    /** False keeps a failure of the primary source visible (and its cached data); the fallback then only fills empty weeks. */
+    private val fallbackOnFailure: Boolean = true,
 ) : RetailerProvider {
     override val id: String = primary.id
     override val displayName: String = primary.displayName
@@ -29,6 +31,7 @@ class FallbackRetailerProvider(
         val directAttempt = runCatching { previewOnly(primary.fetch(request)) }
         val direct = directAttempt.getOrNull()
         if (direct != null && (direct.noLocalMarket || direct.offers.isNotEmpty())) return direct
+        if (direct == null && !fallbackOnFailure) throw directAttempt.exceptionOrNull()!!
         val regionalAttempt = runCatching { previewOnly(fallback.fetch(request)) }
         val regional = regionalAttempt.getOrElse { fallbackError ->
             // An empty result still proves that the primary source is

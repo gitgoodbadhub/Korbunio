@@ -19,6 +19,19 @@ class FallbackRetailerProviderTest {
         assertEquals("https://cdn.example/product.webp", result.offers.single().imageUrl)
     }
 
+    @Test fun `without fallback on failure an outage stays visible but an empty week is filled`() = runTest {
+        val outage = IllegalStateException("HTTP 503")
+        val attempt = runCatching {
+            FallbackRetailerProvider(fake("kaufland", "Kaufland", error = outage), fake("kaufland", "Leaflet"), fallbackOnFailure = false)
+                .fetch(RetailerRequest("26122"))
+        }
+        assertTrue(attempt.exceptionOrNull() === outage)
+
+        val filled = FallbackRetailerProvider(fake("kaufland", "Kaufland", empty = true), fake("kaufland", "Leaflet"), fallbackOnFailure = false)
+            .fetch(RetailerRequest("26122"))
+        assertEquals("kaufland", filled.offers.single().retailerId)
+    }
+
     @Test fun `retains successful official result`() = runTest {
         val primary = fake("rossmann", "Rossmann")
         val fallback = fake("marktguru-rossmann", "Rossmann regional")
