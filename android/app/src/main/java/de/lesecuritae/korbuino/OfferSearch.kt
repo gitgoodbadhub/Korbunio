@@ -112,6 +112,25 @@ object OfferSearch {
         return Query(terms, wanted, query.trim())
     }
 
+    /**
+     * The query as typed, plus the words written together when they are two or three:
+     * "Puten Schnitzel" also finds "Putenschnitzel" (and the other way round, see [termScore]).
+     */
+    fun prepareAll(query: String): List<Query> {
+        val first = prepare(query)
+        val words = first.terms.map { it.first() }
+        if (words.size !in 2..3 || words.any { it.any(Char::isDigit) }) return listOf(first)
+        val joined = words.joinToString("")
+        return listOf(first, Query(listOf((listOf(joined) + synonyms[joined].orEmpty()).distinct()), first.quantities, first.raw))
+    }
+
+    /** Best score over [prepareAll]'s spellings. */
+    fun score(queries: List<Query>, offer: Indexed): Int = queries.maxOfOrNull { score(it, offer) } ?: 0
+
+    /** Name parts written together in pairs: "Puten-Schnitzel" / "Puten Schnitzel" → "putenschnitzel". */
+    private fun joinedPairs(offer: Indexed): List<String> =
+        offer.nameText.split(' ').filter { it.isNotBlank() }.zipWithNext { a, b -> a + b }
+
     fun index(name: String, brand: String, description: String, packSize: String?): Indexed {
         val all = normalize("$name $description ${packSize.orEmpty()}")
         val heads = mutableListOf<String>()
@@ -167,6 +186,7 @@ object OfferSearch {
         if (' ' in term) return if (offer.nameText.contains(term)) 9 else 0
         var best = 0
         for (token in offer.nameTokens) best = maxOf(best, tokenScore(term, token))
+        if (best < 10 && joinedPairs(offer).any { it == term }) best = 10
         for (token in offer.nameModifiers) if (token == term || token == stem(term) || token.endsWith(term)) best = maxOf(best, 3)
         for (token in offer.brandTokens) if (token == term) best = maxOf(best, 8)
         if (best == 0 && offer.description.split(' ').any { it.contains(term) }) best = 2
@@ -216,7 +236,8 @@ object OfferSearch {
      */
     fun isSameProduct(query: Query, offer: Indexed): Boolean = query.terms.any { alternatives ->
         alternatives.any { term ->
-            if (' ' in term) offer.nameText.contains(term) else offer.nameTokens.any { isKind(term, it) }
+            if (' ' in term) offer.nameText.contains(term)
+            else offer.nameTokens.any { isKind(term, it) } || joinedPairs(offer).any { isKind(term, it) }
         }
     }
 
