@@ -502,6 +502,17 @@ jobs:
       - name: Run real UI, database and backup regressions
         working-directory: android
         run: ./gradlew --max-workers=2 -PfdroidOnly=true connectedFdroidDebugAndroidTest
+      - name: Show failed UI tests in the log
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          for path in glob.glob("android/app/build/outputs/androidTest-results/connected/**/*.xml", recursive=True):
+              for case in ET.parse(path).getroot().iter("testcase"):
+                  for problem in list(case.findall("failure")) + list(case.findall("error")):
+                      print(f"::error title={case.get('classname')}.{case.get('name')}::{(problem.get('message') or '')[:300]}")
+                      print((problem.text or "")[:3000])
+          PY
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v5
