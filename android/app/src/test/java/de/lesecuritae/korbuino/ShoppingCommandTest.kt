@@ -75,3 +75,14 @@ class ShoppingCommandTest {
         assertTrue(!ShoppingCommand.needsHelp(""))
     }
 }
+
+class SpeechTextTest {
+    @Test fun `pieces after pauses are joined as separate products`() {
+        var text = ""
+        listOf("füge hinzu", "Klopapier", "  ", "zwei Flaschen Wasser", "maximal 5 Euro").forEach { text = SpeechText.append(text, it) }
+        assertEquals("füge hinzu, Klopapier, zwei Flaschen Wasser, maximal 5 Euro", text)
+        assertEquals("Milch, Brot", SpeechText.append("Milch, ", "Brot"))
+        val command = ShoppingCommand.parse(text) as Command.Add
+        assertEquals(listOf(Item("klopapier"), Item("wasser", 2, 500)), command.items)
+    }
+}

@@ -39,10 +39,15 @@ internal fun VoiceAssistantDialog(
     loyaltyPrograms: Set<String>,
     retailerNames: Map<String, String>,
     today: String,
-    onListenAgain: () -> Unit,
+    onListenAgain: (String) -> Unit,
     onDismiss: () -> Unit,
     onConfirm: (VoiceAssistant.Plan) -> Unit,
     ai: OnDeviceAi = NoOnDeviceAi,
+    /** True while the app is still listening; the text grows with every pause until "Fertig". */
+    listening: Boolean = false,
+    partial: String = "",
+    note: String? = null,
+    onStopListening: () -> Unit = {},
 ) {
     var text by remember(initialText) { mutableStateOf(initialText) }
     // Gemini Nano (where the phone has it): its reading replaces the rule-based one until the text is edited.
@@ -71,8 +76,8 @@ internal fun VoiceAssistantDialog(
     }
     LaunchedEffect(ai) { aiStatus = ai.status() }
     // What the rules cannot read, or whole sentences without a command word, go to Gemini Nano straight away.
-    LaunchedEffect(aiStatus, initialText) {
-        if (aiStatus == OnDeviceAi.Status.AVAILABLE && ShoppingCommand.needsHelp(text)) askNano()
+    LaunchedEffect(aiStatus, initialText, listening) {
+        if (!listening && aiStatus == OnDeviceAi.Status.AVAILABLE && ShoppingCommand.needsHelp(text)) askNano()
     }
     val runnable = when (plan) {
         is VoiceAssistant.Plan.Unknown -> false
@@ -91,11 +96,15 @@ internal fun VoiceAssistantDialog(
             ) {
                 OutlinedTextField(
                     value = text, onValueChange = { text = it.take(300); aiCommand = null; aiNote = null },
-                    label = { Text("Verstanden") }, modifier = Modifier.fillMaxWidth().testTag("voice-text"),
+                    label = { Text(if (listening) "🎤 Ich höre zu … sprechen Sie ruhig mit Pausen" else "Verstanden") },
+                    readOnly = listening, modifier = Modifier.fillMaxWidth().testTag("voice-text"),
                 )
+                if (listening && partial.isNotBlank()) Text("… $partial", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("voice-partial"))
+                note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
                 Text(VoiceAssistant.describe(plan, retailerNames), fontWeight = FontWeight.Bold,
                     modifier = Modifier.testTag("voice-summary"))
-                NanoRow(aiStatus, aiBusy, usedNano = aiCommand != null, note = aiNote, onAsk = askNano, onDownload = {
+                if (!listening) NanoRow(aiStatus, aiBusy, usedNano = aiCommand != null, note = aiNote, onAsk = askNano, onDownload = {
                     aiStatus = OnDeviceAi.Status.DOWNLOADING
                     scope.launch { ai.download(); aiStatus = ai.status() }
                 })
@@ -103,13 +112,14 @@ internal fun VoiceAssistantDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(plan) }, enabled = runnable, modifier = Modifier.testTag("voice-confirm")) {
+            if (listening) Button(onClick = onStopListening, modifier = Modifier.testTag("voice-stop")) { Text("Fertig") }
+            else Button(onClick = { onConfirm(plan) }, enabled = runnable, modifier = Modifier.testTag("voice-confirm")) {
                 Text("Ausführen")
             }
         },
         dismissButton = {
             Row {
-                TextButton(onClick = onListenAgain) { Text("🎤 Neu") }
+                if (!listening) TextButton(onClick = { onListenAgain(text) }, modifier = Modifier.testTag("voice-continue")) { Text("🎤 Weiter") }
                 TextButton(onClick = onDismiss) { Text("Abbrechen") }
             }
         },
